@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a7dff" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="iSafedrive" />
+  <title>iSafedrive — Ride Hailing, Nigeria</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="apple-touch-icon" href="logo.png" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- ============ AUTH / SPLASH ============ -->
+  <div id="splash" class="splash">
+    <div class="splash-logo"><img class="logo-img splash-img" src="logo.png" alt="iSafedrive logo" /></div>
+    <p class="splash-tag">Move safely. Arrive safely.</p>
+    <div class="splash-loader"><span></span></div>
+  </div>
+
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-card">
+
+      <!-- Role picker -->
+      <div id="role-picker" class="role-picker">
+        <div class="rp-brand">
+          <img class="logo-img auth-img" src="logo.png" alt="iSafedrive logo" />
+          <p>Move safely. Arrive safely.</p>
+          <span class="rp-tag">WHICH PORTAL DO YOU NEED?</span>
+        </div>
+        <div class="role-grid">
+          <button class="role-card" type="button" data-role="passenger">
+            <span class="rc-ico">🧍</span>
+            <span><b>Passenger</b><span>Book a ride anywhere</span></span>
+            <span class="rc-go">›</span>
+          </button>
+          <button class="role-card" type="button" data-role="driver">
+            <span class="rc-ico">🧑‍✈️</span>
+            <span><b>Driver</b><span>Drive and earn on iSafedrive</span></span>
+            <span class="rc-go">›</span>
+          </button>
+          <button class="role-card" type="button" data-role="admin">
+            <span class="rc-ico">🛡️</span>
+            <span><b>Admin</b><span>Manage the platform</span></span>
+            <span class="rc-go">›</span>
+          </button>
+        </div>
+        <p class="rp-foot" id="auth-foot"></p>
+      </div>
+
+      <!-- Sign in / Register for the selected role -->
+      <div id="auth-role-screen" class="hidden">
+        <div class="auth-brand-sm">
+          <img class="logo-img" src="logo.png" alt="iSafedrive logo" />
+        </div>
+        <div class="auth-head">
+          <button class="auth-back" id="btn-auth-back" type="button">‹</button>
+          <h2 id="auth-role-title">Passenger</h2>
+        </div>
+        <p class="auth-sub" id="auth-role-sub">Sign in to book your ride</p>
+
+        <div class="auth-tabs">
+          <button type="button" class="at-tab active" data-mode="login">Sign in</button>
+          <button type="button" class="at-tab" data-mode="register">Create account</button>
+        </div>
+
+        <form id="login-form" autocomplete="off">
+          <div class="field">
+            <label>Phone number</label>
+            <input type="tel" id="login-phone" placeholder="e.g. 08012345678" required />
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="login-password" placeholder="Enter your password" required />
+          </div>
+          <p class="form-error" id="login-error"></p>
+          <button type="submit" class="btn btn-primary btn-block" id="login-btn">Sign in</button>
+        </form>
+
+        <form id="register-form" class="hidden" autocomplete="off">
+          <div class="field">
+            <label>Full name</label>
+            <input type="text" id="reg-name" placeholder="e.g. Ada Nnaji" required />
+          </div>
+          <div class="field">
+            <label>Phone number</label>
+            <input type="tel" id="reg-phone" placeholder="e.g. 08012345678" required />
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="reg-password" placeholder="Create a password (min 4 chars)" required />
+          </div>
+          <div class="reg-driver hidden" id="reg-driver">
+            <div class="field">
+              <label>Vehicle type</label>
+              <select class="select" id="reg-vehicle">
+                <option value="Mini">🚙 Mini</option>
+                <option value="Sedan" selected>🚗 Sedan</option>
+                <option value="SUV">🚐 SUV</option>
+                <option value="Premium">🚘 Premium</option>
+                <option value="Okada">🏍️ Okada</option>
+                <option value="Keke">🛺 Keke</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Vehicle plate</label>
+              <input type="text" id="reg-plate" placeholder="e.g. APP 123 LAG" />
+            </div>
+          </div>
+          <p class="form-error" id="register-error"></p>
+          <button type="submit" class="btn btn-primary btn-block" id="register-btn">Create account</button>
+          <p class="auth-note muted" id="auth-role-note"></p>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ APP SHELL ============ -->
+  <div id="app-shell" class="app-shell hidden">
+
+    <main id="main">
+
+      <!-- ============ PASSENGER (independent app) ============ -->
+      <section id="passenger-app" class="role-view hidden">
+        <header class="topbar">
+          <div class="topbar-left">
+            <img class="logo-img topbar-img" src="logo.png" alt="iSafedrive" />
+            <div><strong id="pax-name"></strong></div>
+          </div>
+          <div class="topbar-right">
+            <span class="mode-pill" id="mode-pill-pax">LIVE</span>
+            <button class="icon-btn js-logout" title="Sign out">⏻</button>
+          </div>
+        </header>
+        <div class="pax-map-wrap">
+          <div id="pax-map"></div>
+          <button class="fab-locate" id="btn-pax-locate" title="My location">◎</button>
+          <div id="pax-toast" class="pax-toast hidden"></div>
+        </div>
+
+        <div class="pax-sheet" id="pax-sheet">
+          <div class="sheet-handle"></div>
+
+          <!-- Booking form -->
+          <div id="pax-booking" class="pax-section">
+            <div class="where-row">
+              <div class="where-dots">
+                <span class="dot dot-a"></span>
+                <span class="dot-line"></span>
+                <span class="dot dot-b"></span>
+              </div>
+              <div class="where-inputs">
+                <input id="pickup-input" class="where-input" placeholder="Pickup location" />
+                <input id="dropoff-input" class="where-input" placeholder="Where to?" />
+              </div>
+            </div>
+            <div class="vehicle-options" id="vehicle-options"></div>
+            <div class="fare-row" id="fare-row" hidden>
+              <div>
+                <small>Estimated fare</small>
+                <div class="fare-amount" id="fare-amount">₦0</div>
+                <small class="fare-original" id="fare-original" hidden></small>
+              </div>
+              <div class="fare-meta">
+                <span id="fare-meta"></span>
+                <span class="fare-breakdown" id="fare-breakdown"></span>
+              </div>
+            </div>
+            <div class="promo-row">
+              <input id="promo-input" class="promo-input" placeholder="Promo code (try SAFE10)" autocomplete="off" />
+              <button class="btn btn-ghost promo-btn" id="btn-promo-apply">Apply</button>
+              <span class="promo-msg" id="promo-msg"></span>
+            </div>
+            <div class="pay-row">
+              <select id="pay-method" class="select">
+                <option value="cash">💵 Cash</option>
+                <option value="card">💳 Card</option>
+                <option value="transfer">🏦 Bank transfer</option>
+              </select>
+              <button class="btn btn-primary" id="btn-book">Book ride</button>
+            </div>
+            <div id="pay-card" class="pay-box hidden">
+              <p class="pay-title">💳 Pay with card</p>
+              <input id="card-name" class="pay-input" placeholder="Cardholder name" autocomplete="off" />
+              <input id="card-number" class="pay-input" placeholder="Card number" inputmode="numeric" maxlength="19" autocomplete="off" />
+              <div class="pay-row2">
+                <input id="card-expiry" class="pay-input" placeholder="MM/YY" maxlength="5" autocomplete="off" />
+                <input id="card-cvv" class="pay-input" placeholder="CVV" inputmode="numeric" maxlength="4" autocomplete="off" />
+              </div>
+              <p class="muted">Test card: 5061 0000 0000 0000, any future date.</p>
+            </div>
+            <div id="pay-transfer" class="pay-box hidden">
+              <p class="pay-title">🏦 Bank transfer</p>
+              <p class="muted">Transfer the fare to:<br /><b>iSafedrive Ltd · GTBank · 0123456789</b><br />Use reference <b id="transfer-ref">#ISAF-…</b>. We confirm your payment before pickup.</p>
+            </div>
+            <div id="pay-processing" class="pay-processing hidden">
+              <span class="pay-spinner"></span><span id="pay-processing-text">Processing payment…</span>
+            </div>
+          </div>
+
+          <!-- Searching -->
+          <div id="pax-searching" class="pax-section hidden">
+            <div class="pulse-ring"><span>🛺</span></div>
+            <h3>Finding your driver…</h3>
+            <p class="muted" id="pax-search-sub">Contacting nearby drivers</p>
+            <button class="btn btn-ghost" id="btn-cancel-request">Cancel request</button>
+          </div>
+
+          <!-- Assigned / en-route -->
+          <div id="pax-active" class="pax-section hidden">
+            <div class="active-driver-row">
+              <div class="avatar avatar-drv" id="pax-driver-avatar">🚗</div>
+              <div class="active-driver-info">
+                <strong id="pax-driver-name">Driver</strong>
+                <span id="pax-car-detail">Sedan • —</span>
+                <span class="star-row"><span>★</span><span id="pax-driver-rating">5.0</span></span>
+              </div>
+              <div class="active-fare">
+                <small>Fare</small>
+                <strong id="pax-fare">₦0</strong>
+              </div>
+            </div>
+            <div class="status-line" id="pax-status-line"></div>
+            <div class="pay-status" id="pax-pay-status"></div>
+            <button class="btn btn-sos" id="btn-sos"><span>🆘</span> Emergency (SOS)</button>
+            <div class="active-actions">
+              <button class="btn btn-ghost-danger hidden" id="btn-cancel-ride">Cancel</button>
+              <button class="btn btn-primary hidden" id="btn-rate-open">Rate driver</button>
+              <button class="btn btn-ghost hidden" id="btn-ride-done">Done</button>
+            </div>
+            <div id="pax-rate" class="rate-box hidden">
+              <div class="stars" id="pax-stars">
+                <button data-s="1">★</button><button data-s="2">★</button><button data-s="3">★</button>
+                <button data-s="4">★</button><button data-s="5">★</button>
+              </div>
+              <input class="rate-comment" id="pax-comment" placeholder="Leave a comment (optional)" />
+              <button class="btn btn-primary btn-block" id="btn-rate-submit">Submit rating</button>
+            </div>
+            <div id="pax-receipt" class="receipt hidden">
+              <div class="receipt-head">🧾 Trip receipt</div>
+              <div class="receipt-body" id="pax-receipt-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <nav class="bottom-tabs">
+          <button class="bt-tab active" data-tab="book"><span>🗺️</span>Book</button>
+          <button class="bt-tab" data-tab="trips"><span>🕘</span>Trips</button>
+          <button class="bt-tab" data-tab="profile"><span>👤</span>Profile</button>
+        </nav>
+
+        <div id="pax-trips" class="pax-list-view hidden"></div>
+        <div id="pax-profile" class="pax-list-view hidden"></div>
+      </section>
+
+      <!-- ============ DRIVER (independent app) ============ -->
+      <section id="driver-app" class="role-view hidden">
+        <header class="topbar">
+          <div class="topbar-left">
+            <img class="logo-img topbar-img" src="logo.png" alt="iSafedrive" />
+            <div><strong id="drv-name"></strong></div>
+          </div>
+          <div class="topbar-right">
+            <span class="mode-pill" id="mode-pill-drv">LIVE</span>
+            <button class="icon-btn js-logout" title="Sign out">⏻</button>
+          </div>
+        </header>
+        <div class="drv-map-wrap" id="drv-map-wrap">
+          <div id="drv-map"></div>
+          <button class="fab-locate" id="btn-drv-locate" title="My location">◎</button>
+          <div class="drv-online-pill" id="drv-online-pill">● Offline</div>
+        </div>
+
+        <!-- Ride request card -->
+        <div id="drv-request" class="drv-request hidden">
+          <div class="request-top">
+            <span class="request-badge">NEW RIDE REQUEST</span>
+            <button class="icon-btn" id="btn-drv-decline">✕</button>
+          </div>
+          <h3 id="drv-req-title">Ride request</h3>
+          <div class="request-meta">
+            <div><span class="req-pin pin-a">A</span><span id="drv-req-pickup">Pickup</span></div>
+            <div><span class="req-pin pin-b">B</span><span id="drv-req-dropoff">Dropoff</span></div>
+          </div>
+          <div class="request-detail">
+            <span>Passenger</span><strong id="drv-req-pax">—</strong>
+            <span>Distance</span><strong id="drv-req-dist">— km</strong>
+            <span>Fare</span><strong id="drv-req-fare">₦0</strong>
+            <span>Payment</span><strong id="drv-req-pay">—</strong>
+          </div>
+          <button class="btn btn-primary btn-block" id="btn-drv-accept">Accept ride</button>
+        </div>
+
+        <!-- Active trip card -->
+        <div id="drv-active" class="drv-active hidden">
+          <div class="drv-active-head">
+            <div>
+              <strong id="drv-active-status">Heading to pickup</strong>
+              <p id="drv-active-sub">0.0 km away</p>
+            </div>
+            <div class="active-fare"><small>Fare</small><strong id="drv-active-fare">₦0</strong></div>
+          </div>
+          <div class="drv-active-dest">
+            <span class="req-pin pin-a">A</span><span id="drv-active-pickup">—</span>
+            <span class="req-pin pin-b">B</span><span id="drv-active-dropoff">—</span>
+          </div>
+          <div class="drv-active-actions">
+            <button class="btn btn-primary" id="btn-drv-status">Start trip</button>
+            <button class="btn btn-ghost-danger" id="btn-drv-cancel-trip">Cancel</button>
+          </div>
+          <div id="drv-pay" class="drv-pay hidden">
+            <div class="drv-pay-info" id="drv-pay-info"></div>
+            <button class="btn btn-primary btn-block hidden" id="btn-drv-pay-confirm">Confirm payment received</button>
+          </div>
+        </div>
+
+        <div class="drv-bottom-area">
+          <div class="drv-idle-card" id="drv-idle-card">
+            <div class="drv-idle-info">
+              <strong>Ready for rides</strong>
+              <span id="drv-idle-earnings">Today: ₦0 · ₦0 earned</span>
+            </div>
+            <button class="go-online" id="btn-go-online">Go Online</button>
+          </div>
+        </div>
+
+        <nav class="bottom-tabs">
+          <button class="bt-tab active" data-tab="home"><span>🏠</span>Home</button>
+          <button class="bt-tab" data-tab="earnings"><span>💰</span>Earnings</button>
+          <button class="bt-tab" data-tab="trips"><span>🕘</span>Trips</button>
+          <button class="bt-tab" data-tab="profile"><span>👤</span>Profile</button>
+        </nav>
+
+        <div id="drv-earnings-view" class="pax-list-view hidden"></div>
+        <div id="drv-trips-view" class="pax-list-view hidden"></div>
+        <div id="drv-profile-view" class="pax-list-view hidden"></div>
+      </section>
+
+      <!-- ============ ADMIN ============ -->
+      <section id="admin-app" class="role-view hidden">
+        <aside class="admin-side" id="admin-side">
+          <div class="admin-brand">
+            <img class="logo-img admin-logo" src="logo.png" alt="iSafedrive" />
+            <div><strong>Admin</strong><small id="admin-name"></small></div>
+          </div>
+          <button class="admin-nav active" data-admin="dashboard"><span>📊</span>Dashboard</button>
+          <button class="admin-nav" data-admin="livemap"><span>🗺️</span>Live Map</button>
+          <button class="admin-nav" data-admin="rides"><span>🚗</span>Rides</button>
+          <button class="admin-nav" data-admin="drivers"><span>🧑‍✈️</span>Drivers</button>
+          <button class="admin-nav" data-admin="users"><span>👥</span>Users</button>
+          <button class="admin-nav" data-admin="analytics"><span>📈</span>Analytics</button>
+        </aside>
+        <div class="admin-main">
+          <div id="admin-dashboard" class="admin-section"></div>
+          <div id="admin-livemap" class="admin-section hidden">
+            <div id="admin-map" class="admin-map"></div>
+            <div class="admin-map-legend">
+              <span><i class="lg-dot av"></i> Available</span>
+              <span><i class="lg-dot busy"></i> Busy</span>
+              <span><i class="lg-dot offline"></i> Offline</span>
+            </div>
+          </div>
+          <div id="admin-rides" class="admin-section hidden"></div>
+          <div id="admin-drivers" class="admin-section hidden"></div>
+          <div id="admin-users" class="admin-section hidden"></div>
+          <div id="admin-analytics" class="admin-section hidden"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="sos-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title">🆘 Emergency help</div>
+      <p class="muted">Your live location and current trip details can be shared with emergency services. Select an option to call now.</p>
+      <a class="btn btn-sos btn-block" href="tel:112">📞 Call 112 — Emergency</a>
+      <a class="btn btn-sos-police btn-block" href="tel:199">📞 Call 199 — Police</a>
+      <a class="btn btn-sos-fire btn-block" href="tel:199">📞 Call 199 — Fire</a>
+      <button class="btn btn-ghost btn-block" id="btn-sos-close">Close</button>
+    </div>
+  </div>
+
+  <div id="admin-detail" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-title" id="ad-title">Details</div>
+      <div class="modal-body" id="ad-body"></div>
+      <button class="btn btn-ghost btn-block mt8" id="btn-ad-close">Close</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/passenger.js"></script>
+  <script src="js/driver.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

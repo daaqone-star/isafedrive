@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+isafedrive.db
+server.log
+node_modules/

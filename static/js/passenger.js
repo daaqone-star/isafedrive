@@ -1,0 +1,505 @@
+/* iSafedrive — Passenger app */
+(function (global) {
+  const U = global.U;
+  const MK = global.MapKit;
+  const api = global.api;
+  const L = global.L;
+
+  const P = {
+    map: null,
+    pickup: null,
+    dropoff: null,
+    vehicleType: "Sedan",
+    activeRide: null,
+    pollTimer: null,
+    nearbyTimer: null,
+    markers: { pickup: null, dropoff: null, driver: null, route: [] },
+    nearbyLayer: null,
+    rate: 5,
+    promoCode: "",
+    lat: 6.5244,
+    lng: 3.3792,
+  };
+
+  function el(id) { return document.getElementById(id); }
+
+  // ---------------------------------------------------------------
+  function init() {
+    P.map = MK.createMap(el("pax-map"));
+    P.map.on("click", onMapClick);
+    P.nearbyLayer = L.layerGroup().addTo(P.map);
+
+    el("btn-pax-locate").onclick = () => useGeolocation(true);
+
+    buildVehicleOptions();
+
+    el("pickup-input").addEventListener("focus", (e) => {
+      if (!P.pickup) useGeolocation(false);
+    });
+    el("btn-book").onclick = book;
+    el("btn-cancel-request").onclick = () => cancelActive("Passenger cancelled request");
+    el("btn-cancel-ride").onclick = () => cancelActive("Passenger cancelled");
+    el("btn-rate-open").onclick = () => el("pax-rate").classList.remove("hidden");
+    el("btn-rate-submit").onclick = submitRating;
+    el("btn-ride-done").onclick = () => { stopRide(); U.toast("Safe journey — see you next time!"); };
+    el("pay-method").onchange = () => { syncPayUI(); };
+    el("card-number").addEventListener("input", () => {
+      el("card-number").value = el("card-number").value.replace(/[^\d]/g, "").replace(/(\d{4})(?=\d)/g, "$1 ");
+    });
+    el("card-expiry").addEventListener("input", () => {
+      const v = el("card-expiry").value.replace(/[^\d]/g, "");
+      if (v.length > 2) el("card-expiry").value = v.slice(0, 2) + "/" + v.slice(2, 4);
+    });
+    el("btn-promo-apply").onclick = applyPromoCode;
+    el("promo-input").addEventListener("keydown", (e) => { if (e.key === "Enter") applyPromoCode(); });
+    el("btn-sos").onclick = () => el("sos-modal").classList.remove("hidden");
+    el("btn-sos-close").onclick = () => el("sos-modal").classList.add("hidden");
+
+    // stars
+    el("pax-stars").querySelectorAll("button").forEach((b) => {
+      b.onclick = () => {
+        P.rate = Number(b.dataset.s);
+        el("pax-stars").querySelectorAll("button").forEach((x) => x.classList.toggle("on", Number(x.dataset.s) <= P.rate));
+      };
+    });
+
+    // bottom tabs
+    document.querySelectorAll("#passenger-app .bt-tab").forEach((t) => {
+      t.onclick = () => paxTab(t.dataset.tab);
+    });
+
+    el("btn-book").disabled = true;
+    syncPayUI();
+    useGeolocation(true);
+  }
+
+  function syncPayUI() {
+    const m = el("pay-method").value;
+    el("pay-card").classList.toggle("hidden", m !== "card");
+    el("pay-transfer").classList.toggle("hidden", m !== "transfer");
+    el("pay-processing").classList.add("hidden");
+    if (m === "transfer") {
+      el("transfer-ref").textContent = "#ISAF-" + Math.floor(1000 + Math.random() * 9000) + "-" + Date.now().toString(36).toUpperCase().slice(-3);
+    }
+  }
+
+  // Payment helpers
+  function luhn(num) {
+    const digits = num.replace(/\D/g, "");
+    if (digits.length < 13 || digits.length > 19) return false;
+    let sum = 0, alt = false;
+    for (let i = digits.length - 1; i >= 0; i--) {
+      let d = parseInt(digits[i], 10);
+      if (alt) { d *= 2; if (d > 9) d -= 9; }
+      sum += d; alt = !alt;
+    }
+    return sum % 10 === 0;
+  }
+
+  function validExpiry(exp) {
+    const m = exp.trim().match(/^(\d{2})\s*\/\s*(\d{2})$/);
+    if (!m) return false;
+    const mm = +m[1], yy = 2000 + +m[2];
+    if (mm < 1 || mm > 12) return false;
+    return new Date(yy, mm, 0, 23, 59, 59) >= new Date();
+  }
+
+  function validateCard() {
+    const name = el("card-name").value.trim();
+    const num = el("card-number").value.trim();
+    const exp = el("card-expiry").value.trim();
+    const cvv = el("card-cvv").value.trim();
+    if (!name) { U.toast("Enter the cardholder name"); return false; }
+    if (!luhn(num)) { U.toast("Enter a valid card number"); return false; }
+    if (!validExpiry(exp)) { U.toast("Enter a valid expiry (MM/YY)"); return false; }
+    if (!/^\d{3,4}$/.test(cvv)) { U.toast("Enter a valid CVV"); return false; }
+    return true;
+  }
+
+  function processPayment(method) {
+    return new Promise((resolve) => {
+      const box = el("pay-processing");
+      box.classList.remove("hidden");
+      el("pay-processing-text").textContent =
+        method === "card" ? "Processing card payment…" : "Generating transfer reference…";
+      setTimeout(() => { box.classList.add("hidden"); resolve(); }, method === "card" ? 1400 : 800);
+    });
+  }
+
+  function useGeolocation(centerMap) {
+    if (!navigator.geolocation) {
+      U.toast("Location unavailable — using default position");
+      placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
+      return;
+    }
+    U.toast("Detecting your location…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        P.lat = pos.coords.latitude;
+        P.lng = pos.coords.longitude;
+        if (centerMap) P.map.setView([P.lat, P.lng], 15);
+        if (!P.pickup) {
+          placePickup({ lat: P.lat, lng: P.lng }, "Current location");
+          U.toast("📍 Current location set as pickup");
+        } else {
+          U.toast("📍 Current location found");
+        }
+      },
+      () => {
+        U.toast("Could not detect location — tap the map to set pickup");
+        if (!P.pickup) placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
+  function onMapClick(e) {
+    if (P.activeRide) return;
+    if (!P.pickup) placePickup(e.latlng);
+    else placeDropoff(e.latlng);
+  }
+
+  function reverseGeocode(latlng, cb) {
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latlng.lat}&lon=${latlng.lng}`)
+      .then((r) => r.json())
+      .then((d) => cb(d?.display_name?.split(",").slice(0, 3).join(",") || `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`))
+      .catch(() => cb(`${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`));
+  }
+
+  function placePickup(p, label) {
+    P.pickup = p;
+    if (P.markers.pickup) P.map.removeLayer(P.markers.pickup);
+    P.markers.pickup = L.marker([p.lat, p.lng], { icon: MK.passengerIcon() }).addTo(P.map);
+    if (label) { el("pickup-input").value = label; }
+    else reverseGeocode(p, (a) => { el("pickup-input").value = a; P.pickup.address = a; });
+    refreshNearby();
+    updateFare();
+  }
+
+  function placeDropoff(p) {
+    P.dropoff = p;
+    if (P.markers.dropoff) P.map.removeLayer(P.markers.dropoff);
+    P.markers.dropoff = L.marker([p.lat, p.lng], { icon: MK.dropIcon("B") }).addTo(P.map);
+    reverseGeocode(p, (a) => { el("dropoff-input").value = a; P.dropoff.address = a; });
+    drawRoute();
+    updateFare();
+    MK.fitAll(P.map, [P.pickup, P.dropoff]);
+  }
+
+  function drawRoute() {
+    P.markers.route.forEach((l) => l.remove());
+    P.markers.route = [];
+    if (P.pickup && P.dropoff) {
+      P.markers.route = MK.polylines(P.map, [P.pickup, P.dropoff], "#1a7dff");
+    }
+  }
+
+  async function refreshNearby() {
+    if (!P.pickup || P.activeRide) return;
+    try {
+      const drv = await api.driversNearby(P.pickup.lat, P.pickup.lng, "any", 6);
+      P.nearbyLayer.clearLayers();
+      drv.slice(0, 12).forEach((d) => {
+        const m = L.marker([d.lat, d.lng], { icon: MK.driverIcon("available") }).addTo(P.nearbyLayer);
+        m.bindPopup(`<b>${U.escapeHtml(d.name)}</b><br>${d.vehicle_type} · ${d.vehicle_reg}<br>${U.km(d.distance_km)} away`);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function buildVehicleOptions() {
+    const wrap = el("vehicle-options");
+    wrap.innerHTML = "";
+    Object.keys(U.FARE_TABLE).forEach((vt) => {
+      const cfg = U.FARE_TABLE[vt];
+      const btn = document.createElement("button");
+      btn.className = "v-opt" + (vt === P.vehicleType ? " selected" : "");
+      btn.innerHTML = `<span class="v-icon">${cfg.icon}</span>
+        <span class="v-name">${vt}</span>
+        <span class="v-price">${U.ngn(cfg.base)}</span>`;
+      btn.onclick = () => {
+        P.vehicleType = vt;
+        wrap.querySelectorAll(".v-opt").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        updateFare();
+      };
+      wrap.appendChild(btn);
+    });
+  }
+
+  function updateFare() {
+    const row = el("fare-row");
+    const both = P.pickup && P.dropoff;
+    el("btn-book").disabled = !both;
+    if (!both) { row.hidden = true; return; }
+    const dist = U.haversine(P.pickup, P.dropoff);
+    const baseFare = U.estimateFare(P.vehicleType, dist);
+    const promo = U.applyPromo(baseFare, P.promoCode);
+    const mins = Math.max(3, Math.round(dist * 5));
+    const breakdown = U.fareBreakdown(P.vehicleType, dist);
+    el("fare-amount").textContent = U.ngn(promo.fare);
+    el("fare-original").textContent = promo.discount ? U.ngn(baseFare) + " (was)" : "";
+    el("fare-original").hidden = !promo.discount;
+    el("fare-meta").textContent = `${U.km(dist)} · ${U.mins(mins)}`;
+    el("fare-breakdown").textContent =
+      `${P.vehicleType}: base ${U.ngn(breakdown.base)} + ${U.ngn(breakdown.distPart)} dist + ${U.ngn(breakdown.timePart)} time`;
+    row.hidden = false;
+  }
+
+  function applyPromoCode() {
+    const raw = el("promo-input").value.trim();
+    const msg = el("promo-msg");
+    const res = U.applyPromo(1, raw); // just validates the code
+    msg.classList.remove("ok", "bad");
+    if (!raw) { P.promoCode = ""; msg.textContent = ""; updateFare(); return; }
+    if (res.code) {
+      P.promoCode = res.code;
+      msg.textContent = `✓ ${res.code} applied`;
+      msg.classList.add("ok");
+    } else {
+      P.promoCode = "";
+      msg.textContent = "Invalid promo code";
+      msg.classList.add("bad");
+    }
+    updateFare();
+  }
+
+  // ---------------------------------------------------------------
+  async function book() {
+    if (!P.pickup || !P.dropoff) { U.toast("Set both pickup and dropoff first"); return; }
+    if (P.activeRide) return;
+    const method = el("pay-method").value;
+    if (method === "card" && !validateCard()) return;
+    const payload = {
+      pickup: { lat: P.pickup.lat, lng: P.pickup.lng, address: el("pickup-input").value },
+      dropoff: { lat: P.dropoff.lat, lng: P.dropoff.lng, address: el("dropoff-input").value },
+      vehicle_type: P.vehicleType,
+      payment_method: method,
+      promo_code: P.promoCode || null,
+    };
+    el("btn-book").disabled = true;
+    try {
+      await processPayment(method);
+      const ride = await api.createRide(payload);
+      P.activeRide = ride;
+      showSection("pax-searching");
+      U.toast(method === "cash" ? "Ride requested — finding your driver…" : "Payment confirmed — finding your driver…");
+      startPolling();
+    } catch (e) {
+      U.toast(e.error || "Could not book ride");
+      el("btn-book").disabled = false;
+    }
+  }
+
+  function showSection(name) {
+    ["pax-booking", "pax-searching", "pax-active"].forEach((s) => el(s).classList.toggle("hidden", s !== name));
+  }
+
+  function startPolling() {
+    clearInterval(P.pollTimer);
+    P.pollTimer = setInterval(async () => {
+      if (!P.activeRide) return;
+      try {
+        const ride = await api.getRide(P.activeRide.id);
+        renderRide(ride);
+      } catch (e) { /* ride may be gone */ }
+    }, 2000);
+  }
+
+  function renderRide(ride) {
+    P.activeRide = ride;
+    if (ride.status === "requesting") {
+      showSection("pax-searching");
+      el("pax-search-sub").textContent = "Contacting nearby drivers…";
+      return;
+    }
+    if (ride.status === "cancelled") {
+      stopRide();
+      U.toast("Your ride was cancelled");
+      return;
+    }
+    showSection("pax-active");
+    updateActiveCard(ride);
+    trackDriver(ride);
+  }
+
+  function updateActiveCard(ride) {
+    const d = ride.driver;
+    el("pax-driver-name").textContent = d ? d.name : "Driver";
+    el("pax-driver-avatar").textContent = "🚗";
+    el("pax-car-detail").textContent = `${ride.vehicle_type} · ${d ? d.vehicle_reg : "—"}`;
+    el("pax-driver-rating").textContent = d ? d.rating?.toFixed(1) : "5.0";
+    el("pax-fare").textContent = U.ngn(ride.fare);
+
+    const line = el("pax-status-line");
+    const statuses = {
+      assigned: ["🚙", "Driver assigned — heading to your pickup"],
+      driver_arriving: ["🚙", "Your driver is on the way"],
+      arrived: ["🛑", "Your driver has arrived — come out!"],
+      in_transit: ["🛺", "On the way to your destination"],
+      completed: ["✅", "Trip completed — safe journey!"],
+    };
+    const [ico, txt] = statuses[ride.status] || ["🚙", ride.status];
+    line.innerHTML = `<span class="st-ico">${ico}</span><span>${txt}</span>`;
+
+    const pay = el("pax-pay-status");
+    pay.textContent = ride.payment_method === "card" ? "💳 Paid by card"
+      : ride.payment_method === "transfer" ? "🏦 Bank transfer · confirm before pickup"
+      : "💵 Cash · pay at destination";
+
+    const cancelBtn = el("btn-cancel-ride");
+    const rateBtn = el("btn-rate-open");
+    const doneBtn = el("btn-ride-done");
+    const finished = ride.status === "completed" || ride.status === "cancelled";
+    cancelBtn.classList.toggle("hidden", finished);
+    rateBtn.classList.toggle("hidden", ride.status !== "completed");
+    doneBtn.classList.toggle("hidden", !finished);
+    el("pax-rate").classList.toggle("hidden", ride.status !== "completed");
+    renderReceipt(ride);
+  }
+
+  function renderReceipt(ride) {
+    const box = el("pax-receipt");
+    if (ride.status !== "completed") { box.classList.add("hidden"); return; }
+    const bd = U.fareBreakdown(ride.vehicle_type, ride.distance_km);
+    const rows = [
+      ["Base fare", U.ngn(bd.base)],
+      ["Distance (" + U.km(ride.distance_km) + ")", U.ngn(bd.distPart)],
+      ["Time (" + U.mins(ride.duration_min) + ")", U.ngn(bd.timePart)],
+    ];
+    if (ride.discount > 0) rows.push(["Promo " + (ride.promo_code || ""), "-" + U.ngn(ride.discount)]);
+    const rowHtml = rows.map(([k, v]) =>
+      `<div class="rc-line ${k.startsWith("Promo") ? "discount" : ""}"><span>${k}</span><span>${v}</span></div>`).join("");
+    el("pax-receipt-body").innerHTML = `
+      ${rowHtml}
+      <div class="rc-line total"><span>Total paid (${ride.payment_method})</span><span>${U.ngn(ride.fare)}</span></div>
+      <div class="rc-line"><span>Trip ID</span><span>#${ride.id}</span></div>`;
+    box.classList.remove("hidden");
+  }
+
+  function trackDriver(ride) {
+    const d = ride.driver;
+    if (!d) return;
+    if (!P.markers.driver) {
+      P.markers.driver = L.marker([d.lat, d.lng], { icon: MK.driverIcon("busy"), zIndexOffset: 1000 }).addTo(P.map);
+    } else {
+      P.markers.driver.setLatLng([d.lat, d.lng]);
+    }
+    P.markers.route.forEach((l) => l.remove());
+    P.markers.route = [];
+    const pts = [{ lat: ride.pickup_lat, lng: ride.pickup_lng }, { lat: ride.dropoff_lat, lng: ride.dropoff_lng }];
+    if (P.markers.pickup) P.markers.pickup.setLatLng([ride.pickup_lat, ride.pickup_lng]);
+    if (P.markers.dropoff) P.markers.dropoff.setLatLng([ride.dropoff_lat, ride.dropoff_lng]);
+    P.markers.route = MK.polylines(P.map, pts, "#1a7dff");
+    if (ride.status === "assigned" || ride.status === "driver_arriving") {
+      MK.fitAll(P.map, [d, { lat: ride.pickup_lat, lng: ride.pickup_lng }]);
+    } else if (ride.status === "in_transit") {
+      MK.fitAll(P.map, [d, { lat: ride.dropoff_lat, lng: ride.dropoff_lng }]);
+    }
+  }
+
+  async function cancelActive(reason) {
+    if (!P.activeRide) return;
+    try {
+      await api.cancelRide(P.activeRide.id, reason);
+      stopRide();
+      U.toast("Ride cancelled");
+    } catch (e) {
+      U.toast(e.error || "Could not cancel");
+    }
+  }
+
+  async function submitRating() {
+    if (!P.activeRide) return;
+    try {
+      await api.rateRide(P.activeRide.id, P.rate, el("pax-comment").value);
+      U.toast("Thanks for rating your driver!");
+      el("pax-rate").classList.add("hidden");
+    } catch (e) {
+      U.toast(e.error || "Could not submit rating");
+    }
+  }
+
+  function stopRide() {
+    clearInterval(P.pollTimer);
+    P.activeRide = null;
+    if (P.markers.driver) { P.map.removeLayer(P.markers.driver); P.markers.driver = null; }
+    if (P.markers.pickup) { P.map.removeLayer(P.markers.pickup); P.markers.pickup = null; }
+    if (P.markers.dropoff) { P.map.removeLayer(P.markers.dropoff); P.markers.dropoff = null; }
+    P.markers.route.forEach((l) => l.remove());
+    P.markers.route = [];
+    P.pickup = null; P.dropoff = null;
+    P.promoCode = "";
+    el("pickup-input").value = "";
+    el("dropoff-input").value = "";
+    el("fare-row").hidden = true;
+    el("promo-input").value = "";
+    el("promo-msg").textContent = "";
+    el("btn-book").disabled = true;
+    el("pax-receipt").classList.add("hidden");
+    el("pax-pay-status").textContent = "";
+    el("card-name").value = "";
+    el("card-number").value = "";
+    el("card-expiry").value = "";
+    el("card-cvv").value = "";
+    syncPayUI();
+    showSection("pax-booking");
+  }
+
+  // ---------------------------------------------------------------
+  function paxTab(tab) {
+    document.querySelectorAll("#passenger-app .bt-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+    const bookingVisible = tab === "book";
+    el("pax-sheet").classList.toggle("hidden", !bookingVisible);
+    el("pax-trips").classList.toggle("hidden", tab !== "trips");
+    el("pax-profile").classList.toggle("hidden", tab !== "profile");
+    if (tab === "trips") renderTrips();
+    if (tab === "profile") renderProfile();
+    if (bookingVisible) setTimeout(() => P.map?.invalidateSize(), 150);
+  }
+
+  async function renderTrips() {
+    const wrap = el("pax-trips");
+    wrap.innerHTML = `<div class="list-head"><button class="back" onclick="Pax.paxTab('book')">←</button><h2>My Trips</h2></div>`;
+    try {
+      const rides = await api.listRides();
+      if (!rides.length) { wrap.innerHTML += `<p class="muted">No trips yet.</p>`; return; }
+      rides.forEach((r) => {
+        const st = r.status === "completed" ? "st-completed" : r.status === "cancelled" ? "st-cancelled" : "st-active";
+        wrap.innerHTML += `<div class="ride-card">
+          <div class="rc-top"><strong>${r.vehicle_type} · ${U.fmtDate(r.created_at)}</strong>
+            <span class="rc-status ${st}">${U.STATUS_LABEL(r.status)}</span></div>
+          <div class="rc-addr"><span class="req-pin pin-a">A</span><b>${U.escapeHtml(r.pickup_address || "Pickup")}</b></div>
+          <div class="rc-addr"><span class="req-pin pin-b">B</span><b>${U.escapeHtml(r.dropoff_address || "Dropoff")}</b></div>
+          <div class="rc-meta"><span>${U.km(r.distance_km)}</span><span>${U.mins(r.duration_min)}</span>
+            <span class="rc-fare">${U.ngn(r.fare)}</span><span>${r.payment_method}</span></div>
+        </div>`;
+      });
+    } catch (e) { wrap.innerHTML += `<p class="muted">Could not load trips.</p>`; }
+  }
+
+  async function renderProfile() {
+    const wrap = el("pax-profile");
+    const s = api.loadSession();
+    wrap.innerHTML = `<div class="list-head"><button class="back" onclick="Pax.paxTab('book')">←</button><h2>Profile</h2></div>
+      <div class="profile-card">
+        <div class="profile-avatar">${U.escapeHtml((s?.name || "?").charAt(0))}</div>
+        <h2>${U.escapeHtml(s?.name || "")}</h2>
+        <p>${U.escapeHtml(s?.phone || "")}</p>
+        <p>Member since ${U.fmtDate(s?.created_at || new Date().toISOString())}</p>
+      </div>`;
+    try {
+      const rides = await api.listRides();
+      const completed = rides.filter((r) => r.status === "completed");
+      const spent = completed.reduce((a, r) => a + r.fare, 0);
+      wrap.innerHTML += `<div class="stat-grid">
+        <div class="stat-box"><div class="sv">${rides.length}</div><div class="sl">Trips</div></div>
+        <div class="stat-box"><div class="sv">${completed.length}</div><div class="sl">Completed</div></div>
+        <div class="stat-box"><div class="sv">${U.ngn(spent)}</div><div class="sl">Total spent</div></div>
+      </div>`;
+    } catch (e) { /* ignore */ }
+    wrap.innerHTML += `<div class="profile-row"><span>Payment default</span><strong>Cash</strong></div>
+      <div class="profile-row"><span>Zone</span><strong>Lagos</strong></div>`;
+  }
+
+  global.Pax = { init, paxTab, placePickup };
+})(window);
