@@ -67,6 +67,8 @@
     el("register-error").textContent = "";
     el("login-form").reset();
     el("register-form").reset();
+
+
   }
 
   function setMode(mode) {
@@ -181,10 +183,10 @@
     const btn = el("login-btn");
     btn.disabled = true;
     el("login-error").textContent = "";
+    const r = parseRoute();
     try {
-      const res = await api.login({ phone, password });
+      const res = await api.login({ phone, password, role: r.role || "passenger" });
       api.saveSession(res.user);
-      const r = parseRoute();
       if (r.role) sessionStorage.setItem(SESSION_KEY, r.role);
       enterApp(res.user);
     } catch (err) {

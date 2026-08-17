@@ -89,14 +89,40 @@ def api_login():
     body = _json_body()
     phone = _norm_phone(body.get("phone"))
     password = body.get("password") or ""
+    role = body.get("role") or "passenger"
     conn = db.get_conn()
     user = conn.execute(
         "SELECT * FROM users WHERE phone=? AND password=?",
         (phone, password),
     ).fetchone()
-    conn.close()
     if not user:
-        return jsonify({"error": "Invalid phone or password"}), 401
+        existing = conn.execute("SELECT id FROM users WHERE phone=?", (phone,)).fetchone()
+        if existing:
+            conn.close()
+            return jsonify({"error": "Invalid phone or password"}), 401
+        if role not in ("passenger", "driver"):
+            conn.close()
+            return jsonify({"error": "Invalid phone or password"}), 401
+        name = (body.get("name") or phone).strip()
+        cur = conn.execute(
+            "INSERT INTO users(name, phone, password, role) VALUES(?,?,?,?)",
+            (name, phone, password, role),
+        )
+        user_id = cur.lastrowid
+        if role == "driver":
+            conn.execute(
+                """INSERT INTO drivers(user_id, name, phone, vehicle_type, vehicle_reg,
+                   lat, lng, approved, online, status)
+                   VALUES(?,?,?,?,?,?,?,0,0,'offline')""",
+                (user_id, name, phone,
+                 body.get("vehicle_type", "Mini"), body.get("vehicle_reg", "---"),
+                 body.get("lat", db.LAGOS_CENTER[0]), body.get("lng", db.LAGOS_CENTER[1])),
+            )
+        conn.commit()
+        user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        conn.close()
+        return jsonify({"token": user_id, "user": _user_dict(user)})
+    conn.close()
     return jsonify({"token": user["id"], "user": _user_dict(user)})
 
 
