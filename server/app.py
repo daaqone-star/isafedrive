@@ -541,7 +541,7 @@ def api_driver_earnings():
     drv = conn.execute("SELECT * FROM drivers WHERE user_id=?", (user["id"],)).fetchone()
     if not drv:
         conn.close()
-        return jsonify([])
+        return jsonify({"total": 0, "revenue": 0, "today_rides": 0, "today_revenue": 0, "avg_rating": 0, "total_earned": 0, "trips": 0})
     today = datetime.now().strftime("%Y-%m-%d")
     stats = conn.execute(
         """SELECT COUNT(*) AS total, COALESCE(SUM(fare),0) AS revenue,

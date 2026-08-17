@@ -32,8 +32,11 @@
     let data = null;
     try { data = await res.json(); } catch (e) { /* ignore */ }
     if (!res.ok) {
-      const err = new Error(data?.error || res.statusText);
-      err.status = res.status;
+      if (res.status === 401 && path !== "/api/auth/login" && loadSession()) {
+        clearSession();
+        setTimeout(() => location.reload(), 600);
+        throw { error: "Session expired — redirecting to login…", _net: false, status: 401 };
+      }
       throw { error: data?.error || `Request failed (${res.status})`, _net: false, status: res.status };
     }
     return data;

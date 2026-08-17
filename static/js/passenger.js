@@ -289,6 +289,10 @@
         if (!P.pickup) {
           placePickup({ lat: P.lat, lng: P.lng }, "Current location");
           U.toast("📍 Current location set as pickup");
+          setTimeout(() => {
+            const dropoff = el("dropoff-input");
+            if (dropoff) { dropoff.focus(); dropoff.placeholder = "🔍 Where are you going?"; }
+          }, 500);
         } else {
           U.toast("📍 Location updated");
         }
@@ -296,7 +300,13 @@
       () => {
         U.toast("Could not detect location — use search or tap map");
         if (centerMap) P.map.setView([P.lat, P.lng], 14);
-        if (!P.pickup) placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
+        if (!P.pickup) {
+          placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
+          setTimeout(() => {
+            const dropoff = el("dropoff-input");
+            if (dropoff) { dropoff.focus(); dropoff.placeholder = "🔍 Where are you going?"; }
+          }, 500);
+        }
       },
       { enableHighAccuracy: true, timeout: 10000 }
     );
@@ -329,6 +339,14 @@
     P.map.setView([p.lat, p.lng], 15);
     refreshNearby();
     updateFare();
+    setTimeout(() => {
+      const dropoff = el("dropoff-input");
+      if (dropoff && !P.dropoff) {
+        dropoff.classList.add("active-dest");
+        dropoff.focus();
+        dropoff.placeholder = "🔍 Where are you going?";
+      }
+    }, 300);
   }
 
   function placeDropoff(p) {
@@ -340,6 +358,7 @@
     } else {
       reverseGeocode(p, (a) => { el("dropoff-input").value = a; });
     }
+    el("dropoff-input").classList.remove("active-dest");
     drawRoute();
     updateFare();
     if (P.pickup) MK.fitAll(P.map, [P.pickup, P.dropoff]);
@@ -640,6 +659,8 @@
     P.promoCode = "";
     el("pickup-input").value = "";
     el("dropoff-input").value = "";
+    el("dropoff-input").placeholder = "🔍 Search destination…";
+    el("dropoff-input").classList.remove("active-dest");
     el("fare-row").hidden = true;
     el("promo-input").value = "";
     el("promo-msg").textContent = "";

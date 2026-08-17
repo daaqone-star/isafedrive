@@ -125,6 +125,11 @@
       const me = await api.me();
       D.driver = me.driver;
 
+      if (!D.driver) {
+        U.toast("Driver profile not found — please register as a driver");
+        return;
+      }
+
       // If GPS gave us a real position, use that instead of the DB position
       if (D._gpsReady && D.pos) {
         D.base = { lat: D.pos.lat, lng: D.pos.lng };
@@ -141,6 +146,7 @@
       applyOnlineUI();
       startWatchers();
       startGPSWatch();
+      refreshEarnings();
     } catch (e) {
       U.toast("Could not load driver profile");
     }
@@ -314,9 +320,12 @@
   }
 
   async function toggleOnline() {
-    // Make sure server has our GPS position before toggling
-    sendLocationToServer();
+    const btn = el("btn-go-online");
+    btn.disabled = true;
     try {
+      if (D.pos && api.serverMode()) {
+        await api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
+      }
       const drv = await api.toggleDriver(!D.online);
       D.driver = drv;
       D.online = !!drv.online;
@@ -331,6 +340,8 @@
       refreshEarnings();
     } catch (e) {
       U.toast(e.error || "Could not change status");
+    } finally {
+      btn.disabled = false;
     }
   }
 
