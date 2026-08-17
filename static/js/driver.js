@@ -78,7 +78,9 @@
     el("btn-go-online").onclick = toggleOnline;
     el("btn-drv-accept").onclick = acceptRequest;
     el("btn-drv-decline").onclick = declineRequest;
-    el("btn-drv-status").onclick = advanceTrip;
+    el("btn-drv-arrived").onclick = () => advanceTrip("arrived");
+    el("btn-drv-start-ride").onclick = () => advanceTrip("in_transit");
+    el("btn-drv-complete").onclick = () => advanceTrip("complete");
     el("btn-drv-cancel-trip").onclick = () => cancelTrip();
     el("btn-drv-pay-confirm").onclick = confirmPayment;
     document.querySelectorAll("#driver-app .bt-tab").forEach((t) => {
@@ -459,28 +461,29 @@
     return { lat: r.pickup_lat, lng: r.pickup_lng };
   }
 
-  async function advanceTrip() {
+  async function advanceTrip(action) {
     if (!D.activeRide) return;
     const r = D.activeRide;
     try {
-      if (r.status === "in_transit") {
+      if (action === "complete") {
         const done = await api.completeRide(r.id);
         D.activeRide = done;
         U.toast("Trip completed! +" + U.ngn(r.fare));
         notify("Trip Completed", `You earned ${U.ngn(r.fare)}`);
         renderActive();
-      } else if (r.status === "arrived") {
+      } else if (action === "in_transit") {
         const ride = await api.updateRideStatus(r.id, "in_transit");
         D.activeRide = ride;
         U.toast("Trip started — drive safely!");
         notify("Trip Started", "Passenger picked up. Drive safely!");
-      } else {
+        renderActive();
+      } else if (action === "arrived") {
         const ride = await api.updateRideStatus(r.id, "arrived");
         D.activeRide = ride;
-        U.toast("Marked as arrived at pickup");
+        U.toast("Arrived at pickup — wait for passenger");
         notify("Arrived at Pickup", "Waiting for passenger");
+        renderActive();
       }
-      renderActive();
     } catch (e) {
       U.toast(e.error || "Action failed");
     }
@@ -507,8 +510,8 @@
     const target = rideTarget();
     const dist = target && D.pos ? U.haversine(D.pos, target) : 0;
     const statusMap = {
-      assigned: ["Heading to pickup", `${U.km(dist)} away`],
-      driver_arriving: ["Heading to pickup", `${U.km(dist)} away`],
+      assigned: ["Heading to pickup", `${U.km(dist)} to pickup`],
+      driver_arriving: ["Heading to pickup", `${U.km(dist)} to pickup`],
       arrived: ["Waiting at pickup", "Passenger is on the way"],
       in_transit: ["On the way to destination", `${U.km(dist)} remaining`],
       completed: ["Trip completed", "Collect payment to finish"],
@@ -518,8 +521,26 @@
     el("drv-active-status").textContent = title;
     el("drv-active-sub").textContent = sub;
 
-    const btn = el("btn-drv-status");
-    btn.textContent = r.status === "in_transit" ? "Complete trip" : r.status === "arrived" ? "Start trip" : "Arrived at pickup";
+    // Show the correct action button based on status
+    const arrivedBtn = el("btn-drv-arrived");
+    const startBtn = el("btn-drv-start-ride");
+    const completeBtn = el("btn-drv-complete");
+    const cancelBtn = el("btn-drv-cancel-trip");
+    const finished = r.status === "completed" || r.status === "cancelled";
+
+    // Hide all first
+    arrivedBtn.classList.add("hidden");
+    startBtn.classList.add("hidden");
+    completeBtn.classList.add("hidden");
+    cancelBtn.classList.toggle("hidden", finished);
+
+    if (r.status === "assigned" || r.status === "driver_arriving") {
+      arrivedBtn.classList.remove("hidden");
+    } else if (r.status === "arrived") {
+      startBtn.classList.remove("hidden");
+    } else if (r.status === "in_transit") {
+      completeBtn.classList.remove("hidden");
+    }
 
     // Trip code display
     const codeEl = el("drv-trip-code");
@@ -559,16 +580,16 @@
         : r.payment_method === "transfer" ? "paid by bank transfer" : "to collect in cash";
       info.innerHTML = `<b>${U.ngn(r.fare)}</b> fare — passenger ${how}.<br><small class="muted">Confirm to mark this payment as received and finish the trip.</small>`;
       confirmBtn.classList.remove("hidden");
-      el("btn-drv-status").classList.add("hidden");
+      el("btn-drv-arrived").classList.add("hidden");
+      el("btn-drv-start-ride").classList.add("hidden");
+      el("btn-drv-complete").classList.add("hidden");
       el("btn-drv-cancel-trip").classList.add("hidden");
       box.classList.remove("hidden");
       return;
     }
 
     confirmBtn.classList.add("hidden");
-    el("btn-drv-status").classList.remove("hidden");
-    el("btn-drv-cancel-trip").classList.remove("hidden");
-    if (r.status === "cancelled") { box.classList.add("hidden"); return; }
+    if (r.status !== "cancelled") { box.classList.remove("hidden"); }
     info.textContent = `${methodLabel} · ${U.ngn(r.fare)} fare`;
     box.classList.remove("hidden");
   }

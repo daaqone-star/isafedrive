@@ -342,8 +342,16 @@
             </div>
           </div>
           <div class="drv-active-actions">
-            <button class="btn btn-primary" id="btn-drv-status">Start trip</button>
-            <button class="btn btn-ghost-danger" id="btn-drv-cancel-trip">Cancel</button>
+            <button class="btn btn-primary drv-action-btn" id="btn-drv-arrived">
+              <span class="drv-btn-icon">📍</span> I've Arrived at Pickup
+            </button>
+            <button class="btn btn-primary drv-action-btn hidden" id="btn-drv-start-ride">
+              <span class="drv-btn-icon">🚗</span> Start Ride
+            </button>
+            <button class="btn btn-primary drv-action-btn hidden" id="btn-drv-complete">
+              <span class="drv-btn-icon">✅</span> Complete Ride
+            </button>
+            <button class="btn btn-ghost-danger" id="btn-drv-cancel-trip">Cancel Trip</button>
           </div>
           <div id="drv-pay" class="drv-pay hidden">
             <div class="drv-pay-info" id="drv-pay-info"></div>

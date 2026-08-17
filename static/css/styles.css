@@ -426,8 +426,21 @@ input, select { font-family: var(--font); font-size: 16px; }
 .drv-active-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
 .drv-active-dest { display: flex; flex-direction: column; gap: 7px; background: var(--bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
 .drv-active-dest > span { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
-.drv-active-actions { display: flex; gap: 10px; }
+.drv-active-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .drv-active-actions .btn { flex: 1; }
+
+/* Driver action buttons - large and prominent */
+.drv-action-btn {
+  display: flex !important; align-items: center; justify-content: center; gap: 8px;
+  padding: 16px 20px !important; font-size: 16px !important; font-weight: 700 !important;
+  border-radius: 16px !important; min-height: 56px; width: 100%;
+  transition: transform .15s, box-shadow .15s;
+}
+.drv-action-btn:active { transform: scale(.97); }
+.drv-btn-icon { font-size: 20px; }
+#btn-drv-arrived { background: #1a7dff; }
+#btn-drv-start-ride { background: #16a34a; }
+#btn-drv-complete { background: #7c3aed; }
 .drv-pay { margin-top: 12px; background: var(--blue-soft); border-radius: 12px; padding: 12px 14px; }
 .drv-pay-info { font-size: 13.5px; margin-bottom: 10px; }
 .drv-pay-info b { color: var(--blue); }
