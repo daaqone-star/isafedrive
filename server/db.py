@@ -60,10 +60,13 @@ def haversine(lat1, lng1, lat2, lng2):
 def init_db(reset=True):
     conn = get_conn()
     if reset:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE IF EXISTS messages")
         conn.execute("DROP TABLE IF EXISTS ride_events")
         conn.execute("DROP TABLE IF EXISTS rides")
         conn.execute("DROP TABLE IF EXISTS drivers")
         conn.execute("DROP TABLE IF EXISTS users")
+        conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -132,8 +135,21 @@ def init_db(reset=True):
             FOREIGN KEY(ride_id) REFERENCES rides(id)
         );
 
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ride_id INTEGER,
+            conversation_type TEXT NOT NULL DEFAULT 'ride',
+            sender_user_id INTEGER,
+            sender_role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY(ride_id) REFERENCES rides(id),
+            FOREIGN KEY(sender_user_id) REFERENCES users(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_rides_status ON rides(status);
         CREATE INDEX IF NOT EXISTS idx_drivers_online ON drivers(online, approved, status);
+        CREATE INDEX IF NOT EXISTS idx_messages_ride ON messages(ride_id, conversation_type);
         """
     )
     # Bootstrap: exactly one platform admin (no demo passengers, drivers or rides).

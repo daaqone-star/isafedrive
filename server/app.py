@@ -40,6 +40,11 @@ def _json_body():
     return request.get_json(silent=True) or {}
 
 
+import re
+def _norm_phone(p):
+    return re.sub(r'[\s\-()]', '', (p or "")).strip()
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -48,7 +53,7 @@ def _json_body():
 def api_register():
     body = _json_body()
     name = (body.get("name") or "").strip()
-    phone = (body.get("phone") or "").strip()
+    phone = _norm_phone(body.get("phone"))
     password = body.get("password") or ""
     role = body.get("role") or "passenger"
     if not name or not phone or not password:
@@ -82,7 +87,7 @@ def api_register():
 @app.post("/api/auth/login")
 def api_login():
     body = _json_body()
-    phone = (body.get("phone") or "").strip()
+    phone = _norm_phone(body.get("phone"))
     password = body.get("password") or ""
     conn = db.get_conn()
     user = conn.execute(
@@ -711,6 +716,195 @@ def api_admin_analytics():
         "payment_mix": [_to_dict(r) for r in payment_mix],
         "top_drivers": [_to_dict(r) for r in top_drivers],
     })
+
+
+@app.put("/api/admin/users/<int:user_id>")
+def api_admin_edit_user(user_id):
+    user = _require_admin()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    body = _json_body()
+    conn = db.get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+    name = (body.get("name") or row["name"]).strip()
+    phone = _norm_phone(body.get("phone")) or row["phone"]
+    conn.execute("UPDATE users SET name=?, phone=? WHERE id=?", (name, phone, user_id))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/admin/users/<int:user_id>")
+def api_admin_delete_user(user_id):
+    user = _require_admin()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = db.get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "User not found"}), 404
+    if row["role"] == "admin":
+        conn.close()
+        return jsonify({"error": "Cannot delete admin"}), 400
+    if row["role"] == "driver":
+        drv = conn.execute("SELECT id FROM drivers WHERE user_id=?", (user_id,)).fetchone()
+        if drv:
+            conn.execute("DELETE FROM ride_events WHERE driver_id=?", (drv["id"],))
+            conn.execute("UPDATE rides SET driver_id=NULL WHERE driver_id=?", (drv["id"],))
+            conn.execute("DELETE FROM drivers WHERE id=?", (drv["id"],))
+    conn.execute("DELETE FROM messages WHERE sender_user_id=?", (user_id,))
+    conn.execute("DELETE FROM rides WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.put("/api/admin/drivers/<int:driver_id>")
+def api_admin_edit_driver(driver_id):
+    user = _require_admin()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    body = _json_body()
+    conn = db.get_conn()
+    row = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Driver not found"}), 404
+    name = (body.get("name") or row["name"]).strip()
+    vehicle_type = body.get("vehicle_type") or row["vehicle_type"]
+    vehicle_reg = body.get("vehicle_reg") or row["vehicle_reg"]
+    conn.execute("UPDATE drivers SET name=?, vehicle_type=?, vehicle_reg=? WHERE id=?",
+                 (name, vehicle_type, vehicle_reg, driver_id))
+    conn.execute("UPDATE users SET name=? WHERE id=?", (name, row["user_id"]))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/admin/drivers/<int:driver_id>")
+def api_admin_delete_driver(driver_id):
+    user = _require_admin()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = db.get_conn()
+    row = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "Driver not found"}), 404
+    conn.execute("DELETE FROM ride_events WHERE driver_id=?", (driver_id,))
+    conn.execute("DELETE FROM messages WHERE ride_id IN (SELECT id FROM rides WHERE driver_id=?)", (driver_id,))
+    conn.execute("UPDATE rides SET driver_id=NULL WHERE driver_id=?", (driver_id,))
+    conn.execute("DELETE FROM drivers WHERE id=?", (driver_id,))
+    conn.execute("UPDATE users SET role='passenger' WHERE id=?", (row["user_id"],))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Chat / Messaging
+# ---------------------------------------------------------------------------
+
+BOT_RESPONSES = {
+    "hello": "Hello! Welcome to iSafedrive support. How can I help you today?",
+    "hi": "Hi there! How can I assist you?",
+    "help": "I can help with: ride issues, payment problems, account questions, safety concerns, and general inquiries. What's your question?",
+    "fare": "Fares are calculated based on distance, time, and vehicle type. You can see the fare breakdown before booking. Use promo code SAFE10 for 10% off!",
+    "payment": "We accept cash, card, and bank transfers. Card payments are processed securely. If you have payment issues, please describe the problem.",
+    "cancel": "You can cancel a ride from the app. Cancellation fees may apply if the driver is already on the way. Need help with a specific ride?",
+    "safety": "Your safety is our priority. Use the SOS button during any ride to call emergency services. All drivers are verified and rated.",
+    "driver": "All our drivers go through background checks and vehicle inspections. You can rate your driver after each ride.",
+    "complaint": "I'm sorry to hear that. Please provide details about your issue and I'll escalate it to our support team.",
+    "refund": "Refunds are processed within 24-48 hours for eligible cases. Please provide your ride ID and reason for the refund request.",
+    "account": "For account issues, you can update your profile in the app. For password resets or account deletion, please contact us with your registered phone number.",
+    "default": "Thank you for reaching out! I've noted your message. Our support team will review it. Is there anything else I can help with?",
+}
+
+
+def _bot_reply(content):
+    text = content.lower().strip()
+    for key, reply in BOT_RESPONSES.items():
+        if key != "default" and key in text:
+            return reply
+    return BOT_RESPONSES["default"]
+
+
+@app.post("/api/messages")
+def api_send_message():
+    user = _auth_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    body = _json_body()
+    content = (body.get("content") or "").strip()
+    if not content:
+        return jsonify({"error": "Message content required"}), 400
+    ride_id = body.get("ride_id")
+    conv_type = body.get("conversation_type", "ride" if ride_id else "support")
+    sender_role = user["role"]
+    conn = db.get_conn()
+    cur = conn.execute(
+        "INSERT INTO messages(ride_id, conversation_type, sender_user_id, sender_role, content) VALUES(?,?,?,?,?)",
+        (ride_id, conv_type, user["id"], sender_role, content),
+    )
+    msg_id = cur.lastrowid
+    conn.commit()
+    msg = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+    conn.close()
+    result = _to_dict(msg)
+    if conv_type == "support":
+        bot_content = _bot_reply(content)
+        conn2 = db.get_conn()
+        conn2.execute(
+            "INSERT INTO messages(ride_id, conversation_type, sender_user_id, sender_role, content) VALUES(?,'support',NULL,'bot',?)",
+            (None, bot_content),
+        )
+        conn2.commit()
+        bot_msg = conn2.execute("SELECT * FROM messages WHERE id=last_insert_rowid()").fetchone()
+        conn2.close()
+        result["bot_reply"] = _to_dict(bot_msg)
+    return jsonify(result), 201
+
+
+@app.get("/api/messages")
+def api_get_messages():
+    user = _auth_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    ride_id = request.args.get("ride_id")
+    conv_type = request.args.get("type", "ride" if ride_id else "support")
+    conn = db.get_conn()
+    if ride_id:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE ride_id=? AND conversation_type='ride' ORDER BY id",
+            (int(ride_id),),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE conversation_type='support' AND (sender_user_id=? OR sender_role='bot') ORDER BY id",
+            (user["id"],),
+        ).fetchall()
+    conn.close()
+    return jsonify([_to_dict(r) for r in rows])
+
+
+@app.get("/api/admin/messages")
+def api_admin_messages():
+    user = _require_admin()
+    if not user:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = db.get_conn()
+    rows = conn.execute(
+        """SELECT m.*, u.name AS sender_name FROM messages m
+           LEFT JOIN users u ON u.id = m.sender_user_id
+           ORDER BY m.id DESC LIMIT 200"""
+    ).fetchall()
+    conn.close()
+    return jsonify([_to_dict(r) for r in rows])
 
 
 # ---------------------------------------------------------------------------

@@ -80,6 +80,13 @@
     adminApproveDriver: (id, approved) => http("PUT", `/api/admin/drivers/${id}/approve`, { approved }),
     adminSuspendDriver: (id, suspend) => http("PUT", `/api/admin/drivers/${id}/suspend`, { suspend }),
     adminAnalytics: () => http("GET", "/api/admin/analytics"),
+    adminEditUser: (id, data) => http("PUT", `/api/admin/users/${id}`, data),
+    adminDeleteUser: (id) => http("DELETE", `/api/admin/users/${id}`),
+    adminEditDriver: (id, data) => http("PUT", `/api/admin/drivers/${id}`, data),
+    adminDeleteDriver: (id) => http("DELETE", `/api/admin/drivers/${id}`),
+    sendMessage: (data) => http("POST", "/api/messages", data),
+    getMessages: (rideId) => http("GET", `/api/messages${rideId ? "?ride_id=" + rideId : ""}`),
+    adminMessages: () => http("GET", "/api/admin/messages"),
   };
 
   // Build a facade where each method resolves to the right backend.
@@ -104,6 +111,12 @@
           case "toggleDriver": return server.toggleDriver(args[0]);
           case "cancelRide": return server.cancelRide(args[0], args[1]);
           case "driversNearby": return server.driversNearby(args[0], args[1], args[2], args[3]);
+          case "adminEditUser": return server.adminEditUser(args[0], args[1]);
+          case "adminDeleteUser": return server.adminDeleteUser(args[0]);
+          case "adminEditDriver": return server.adminEditDriver(args[0], args[1]);
+          case "adminDeleteDriver": return server.adminDeleteDriver(args[0]);
+          case "sendMessage": return server.sendMessage(args[0]);
+          case "getMessages": return server.getMessages(args[0]);
           default: return server[k](...args);
         }
       }

@@ -112,8 +112,10 @@
 
   document.querySelectorAll(".js-logout").forEach((b) => (b.onclick = logout));
 
+  function normPhone(p) { return (p || "").replace(/[\s\-()]/g, "").trim(); }
+
   async function doLogin() {
-    const phone = el("login-phone").value.trim();
+    const phone = normPhone(el("login-phone").value);
     const password = el("login-password").value;
     if (!phone || !password) { el("login-error").textContent = "Enter your phone and password."; return; }
     const btn = el("login-btn");
@@ -134,7 +136,7 @@
     const r = parseRoute();
     const role = r.role || "passenger";
     const name = el("reg-name").value.trim();
-    const phone = el("reg-phone").value.trim();
+    const phone = normPhone(el("reg-phone").value);
     const password = el("reg-password").value;
     const errEl = el("register-error");
     errEl.textContent = "";
@@ -224,7 +226,7 @@
       el("splash").classList.add("fade-out");
       show("auth-screen");
       renderAuth();
-    }, 6000);
+    }, 3000);
   }
 
   api.detect().catch(() => {}).then(boot);

@@ -201,9 +201,35 @@
       P.nearbyLayer.clearLayers();
       drv.slice(0, 12).forEach((d) => {
         const m = L.marker([d.lat, d.lng], { icon: MK.driverIcon("available") }).addTo(P.nearbyLayer);
-        m.bindPopup(`<b>${U.escapeHtml(d.name)}</b><br>${d.vehicle_type} · ${d.vehicle_reg}<br>${U.km(d.distance_km)} away`);
+        const popupHtml = `<div class="driver-popup">
+          <div class="dp-header"><b>${U.escapeHtml(d.name)}</b><span class="dp-rating">★ ${(d.rating || 5).toFixed(1)}</span></div>
+          <div class="dp-details">
+            <span>🚗 ${d.vehicle_type}</span>
+            <span>📋 ${U.escapeHtml(d.vehicle_reg || "---")}</span>
+            <span>📏 ${U.km(d.distance_km)} away</span>
+          </div>
+          <button class="btn btn-primary btn-block dp-book" onclick="Pax.bookDriver(${d.id}, '${U.escapeHtml(d.vehicle_type)}')">Book ${U.escapeHtml(d.vehicle_type)}</button>
+        </div>`;
+        m.bindPopup(popupHtml, { maxWidth: 260 });
+        m.on("click", () => {
+          P.selectedDriver = d;
+          P.vehicleType = d.vehicle_type;
+          document.querySelectorAll(".v-opt").forEach((b) => {
+            b.classList.toggle("selected", b.querySelector(".v-name")?.textContent === d.vehicle_type);
+          });
+          updateFare();
+        });
       });
     } catch (e) { /* ignore */ }
+  }
+
+  function bookDriver(driverId, vehicleType) {
+    P.vehicleType = vehicleType;
+    document.querySelectorAll(".v-opt").forEach((b) => {
+      b.classList.toggle("selected", b.querySelector(".v-name")?.textContent === vehicleType);
+    });
+    updateFare();
+    U.toast(`Selected ${vehicleType} — set your pickup and dropoff`);
   }
 
   function buildVehicleOptions() {
@@ -498,8 +524,59 @@
       </div>`;
     } catch (e) { /* ignore */ }
     wrap.innerHTML += `<div class="profile-row"><span>Payment default</span><strong>Cash</strong></div>
-      <div class="profile-row"><span>Zone</span><strong>Lagos</strong></div>`;
+      <div class="profile-row"><span>Zone</span><strong>Lagos</strong></div>
+      <button class="btn btn-primary btn-block" style="margin-top:16px" onclick="Pax.openChat()">💬 Chat with Support</button>`;
   }
 
-  global.Pax = { init, paxTab, placePickup };
+  let _chatTimer = null;
+  async function openChat(rideId) {
+    el("chat-panel").classList.remove("hidden");
+    el("chat-title").textContent = rideId ? `Chat — Ride #${rideId}` : "iSafedrive Support";
+    el("chat-messages").innerHTML = "";
+    el("chat-input").value = "";
+    el("chat-send").onclick = () => sendChat(rideId);
+    el("chat-close").onclick = closeChat;
+    el("chat-input").addEventListener("keydown", function h(e) {
+      if (e.key === "Enter") { sendChat(rideId); el("chat-input").removeEventListener("keydown", h); }
+    });
+    await loadChatMessages(rideId);
+    clearInterval(_chatTimer);
+    _chatTimer = setInterval(() => loadChatMessages(rideId), 3000);
+  }
+
+  async function loadChatMessages(rideId) {
+    try {
+      const msgs = await api.getMessages(rideId);
+      const box = el("chat-messages");
+      const wasAtBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      box.innerHTML = msgs.map((m) => {
+        const isMe = m.sender_role !== "bot";
+        const label = m.sender_role === "bot" ? "🤖 Support" : m.sender_role === "driver" ? "🚗 Driver" : "You";
+        return `<div class="chat-msg ${isMe ? "me" : "bot"}">
+          <span class="cm-label">${label}</span>
+          <div class="cm-bubble">${U.escapeHtml(m.content)}</div>
+          <span class="cm-time">${U.fmtTime(m.created_at)}</span>
+        </div>`;
+      }).join("");
+      if (wasAtBottom) box.scrollTop = box.scrollHeight;
+    } catch (e) { /* ignore */ }
+  }
+
+  async function sendChat(rideId) {
+    const input = el("chat-input");
+    const content = input.value.trim();
+    if (!content) return;
+    input.value = "";
+    try {
+      await api.sendMessage({ content, ride_id: rideId || null, conversation_type: rideId ? "ride" : "support" });
+      await loadChatMessages(rideId);
+    } catch (e) { U.toast("Could not send message"); }
+  }
+
+  function closeChat() {
+    el("chat-panel").classList.add("hidden");
+    clearInterval(_chatTimer);
+  }
+
+  global.Pax = { init, paxTab, placePickup, bookDriver, openChat, sendChat, closeChat };
 })(window);

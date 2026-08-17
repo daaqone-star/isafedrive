@@ -11,6 +11,7 @@
   <title>iSafedrive — Ride Hailing, Nigeria</title>
   <link rel="icon" type="image/png" href="logo.png" />
   <link rel="apple-touch-icon" href="logo.png" />
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" />
   <link rel="stylesheet" href="css/styles.css" />
@@ -60,7 +61,7 @@
           <img class="logo-img" src="logo.png" alt="iSafedrive logo" />
         </div>
         <div class="auth-head">
-          <button class="auth-back" id="btn-auth-back" type="button">‹</button>
+          <button class="auth-back hidden" id="btn-auth-back" type="button">‹</button>
           <h2 id="auth-role-title">Passenger</h2>
         </div>
         <p class="auth-sub" id="auth-role-sub">Sign in to book your ride</p>
@@ -398,6 +399,18 @@
     </div>
   </div>
 
+  <div id="chat-panel" class="chat-panel hidden">
+    <div class="chat-head">
+      <strong id="chat-title">iSafedrive Support</strong>
+      <button class="icon-btn" id="chat-close">✕</button>
+    </div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-input-row">
+      <input id="chat-input" class="chat-input" placeholder="Type a message…" autocomplete="off" />
+      <button class="btn btn-primary chat-send-btn" id="chat-send">➤</button>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="js/util.js"></script>
   <script src="js/sim.js"></script>
@@ -407,5 +420,10 @@
   <script src="js/driver.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  </script>
 </body>
 </html>

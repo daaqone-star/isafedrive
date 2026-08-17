@@ -139,6 +139,21 @@
       } catch (e) { /* ignore */ }
     }, 3000);
     setInterval(refreshEarnings, 30000);
+
+    if (navigator.geolocation) {
+      D.geoWatchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          D.base = { ...D.pos };
+          renderSelf();
+          if (api.serverMode()) {
+            api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
+          }
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+      );
+    }
   }
 
   // If a ride was already assigned to this driver (e.g. passenger app or

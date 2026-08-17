@@ -405,6 +405,8 @@
                 ${d.approved ? "Revoke" : "Approve"}</button>
               <button class="mini-btn ${d.approved ? "suspend" : "approve"}" onclick="Adm.suspendDriver(${d.id}, ${d.approved ? 1 : 0})">
                 ${d.approved ? "Suspend" : "Restore"}</button>
+              <button class="mini-btn approve" onclick="Adm.editDriver(${d.id},'${U.escapeHtml(d.name)}','${d.vehicle_type}','${U.escapeHtml(d.vehicle_reg)}')">Edit</button>
+              <button class="mini-btn suspend" onclick="Adm.deleteDriver(${d.id})">Delete</button>
             </td>
           </tr>`).join("") : `<tr><td colspan="8">${emptyState("🧑‍✈️", "No drivers found", "Register as a driver in the app and they will appear here for approval.")}</td></tr>`}
           </tbody></table></div>`;
@@ -435,13 +437,17 @@
           <input class="search" placeholder="Search passengers by name or phone…" value="${A.usersSearch || ""}" oninput="Adm.setUsersSearch(this.value)" />
         </div>
         <div class="table-wrap"><table class="admin-table">
-          <thead><tr><th>Name</th><th>Phone</th><th>Rides</th><th>Joined</th></tr></thead><tbody>
+          <thead><tr><th>Name</th><th>Phone</th><th>Rides</th><th>Joined</th><th>Actions</th></tr></thead><tbody>
           ${filtered.length ? filtered.map((u) => `<tr>
             <td><b>${U.escapeHtml(u.name)}</b></td>
             <td>${U.escapeHtml(u.phone)}</td>
             <td>${u.rides}</td>
             <td>${U.fmtDate(u.created_at)}</td>
-          </tr>`).join("") : `<tr><td colspan="4">${emptyState("👥", "No passengers found", "When passengers register they will appear here.")}</td></tr>`}
+            <td>
+              <button class="mini-btn approve" onclick="Adm.editUser(${u.id},'${U.escapeHtml(u.name)}','${U.escapeHtml(u.phone)}')">Edit</button>
+              <button class="mini-btn suspend" onclick="Adm.deleteUser(${u.id})">Delete</button>
+            </td>
+          </tr>`).join("") : `<tr><td colspan="5">${emptyState("👥", "No passengers found", "When passengers register they will appear here.")}</td></tr>`}
           </tbody></table></div>`;
     } catch (e) {
       wrap.innerHTML = `<h2>Users</h2><p class="muted">Could not load users.</p>`;
@@ -498,6 +504,46 @@
       await api.adminSuspendDriver(id, suspend);
       U.toast(suspend ? "Driver suspended" : "Driver restored");
       renderDrivers(false);
+    },
+    editUser: async (id, currentName, currentPhone) => {
+      const name = prompt("Edit name:", currentName);
+      if (name === null) return;
+      const phone = prompt("Edit phone:", currentPhone);
+      if (phone === null) return;
+      try {
+        await api.adminEditUser(id, { name, phone });
+        U.toast("User updated");
+        renderUsers(false);
+      } catch (e) { U.toast(e.error || "Update failed"); }
+    },
+    deleteUser: async (id) => {
+      if (!confirm("Delete this passenger? This cannot be undone.")) return;
+      try {
+        await api.adminDeleteUser(id);
+        U.toast("User deleted");
+        renderUsers(false);
+      } catch (e) { U.toast(e.error || "Delete failed"); }
+    },
+    editDriver: async (id, currentName, currentType, currentReg) => {
+      const name = prompt("Edit driver name:", currentName);
+      if (name === null) return;
+      const vehicle_type = prompt("Edit vehicle type:", currentType);
+      if (vehicle_type === null) return;
+      const vehicle_reg = prompt("Edit vehicle plate:", currentReg);
+      if (vehicle_reg === null) return;
+      try {
+        await api.adminEditDriver(id, { name, vehicle_type, vehicle_reg });
+        U.toast("Driver updated");
+        renderDrivers(false);
+      } catch (e) { U.toast(e.error || "Update failed"); }
+    },
+    deleteDriver: async (id) => {
+      if (!confirm("Delete this driver? They will be demoted to passenger. This cannot be undone.")) return;
+      try {
+        await api.adminDeleteDriver(id);
+        U.toast("Driver deleted");
+        renderDrivers(false);
+      } catch (e) { U.toast(e.error || "Delete failed"); }
     },
     setRidesFilter: (f) => { A.ridesFilter = f; renderRides(false); },
     setRidesSearch: (v) => { A.ridesSearch = v; renderRides(false); },

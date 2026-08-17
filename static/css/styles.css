@@ -44,8 +44,8 @@ input, select { font-family: var(--font); font-size: 16px; }
 /* ---------- Logo ---------- */
 .logo-img { object-fit: contain; }
 .topbar-img { width: 68px; height: 68px; border-radius: 14px; background: #fff; }
-.splash-img { width: 150px; height: 150px; border-radius: 34px; }
-.auth-img { width: 110px; height: 110px; border-radius: 26px; background: #fff; padding: 6px; }
+.splash-img { width: 330px; height: 330px; border-radius: 34px; }
+.auth-img { width: 330px; height: 330px; border-radius: 26px; background: #fff; padding: 6px; }
 
 /* ---------- Splash (animated) ---------- */
 .splash {
@@ -95,7 +95,7 @@ input, select { font-family: var(--font); font-size: 16px; }
 
 .auth-brand-sm { text-align: center; margin-bottom: 12px; }
 .auth-brand-sm img {
-  width: 78px; height: 78px; border-radius: 20px; background: #fff; padding: 5px;
+  width: 234px; height: 234px; border-radius: 20px; background: #fff; padding: 5px;
   animation: splashPop .5s ease both;
 }
 
@@ -557,6 +557,57 @@ table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; min
   max-width: 90vw; text-align: center;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- Chat Panel ---------- */
+.chat-panel {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 800;
+  height: 70vh; max-height: 70vh;
+  background: #fff; border-radius: 20px 20px 0 0;
+  box-shadow: 0 -8px 30px rgba(0,0,0,.15);
+  display: flex; flex-direction: column;
+  animation: slideUp .3s ease;
+}
+.chat-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.chat-head strong { font-size: 16px; }
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.chat-msg { max-width: 80%; display: flex; flex-direction: column; gap: 2px; }
+.chat-msg.me { align-self: flex-end; align-items: flex-end; }
+.chat-msg.bot { align-self: flex-start; align-items: flex-start; }
+.cm-label { font-size: 10px; color: var(--muted); font-weight: 600; }
+.cm-bubble {
+  padding: 10px 14px; border-radius: 16px; font-size: 14px; line-height: 1.4;
+  word-wrap: break-word;
+}
+.chat-msg.me .cm-bubble { background: var(--blue); color: #fff; border-bottom-right-radius: 4px; }
+.chat-msg.bot .cm-bubble { background: var(--blue-soft); color: var(--ink); border-bottom-left-radius: 4px; }
+.cm-time { font-size: 10px; color: var(--muted); }
+.chat-input-row {
+  display: flex; gap: 8px; padding: 10px 14px;
+  border-top: 1px solid var(--line); background: #fff;
+}
+.chat-input {
+  flex: 1; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 24px;
+  font-size: 15px; background: var(--bg);
+}
+.chat-input:focus { border-color: var(--blue); background: #fff; }
+.chat-send-btn { width: 44px; height: 44px; border-radius: 50%; padding: 0; font-size: 18px; flex: none; }
+
+/* ---------- Driver Popup ---------- */
+.driver-popup { text-align: center; min-width: 180px; }
+.dp-header { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px; }
+.dp-rating { color: var(--yellow); font-weight: 700; font-size: 13px; }
+.dp-details { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.dp-book { font-size: 13px; padding: 10px; }
+
+/* Leaflet popup overrides for driver popup */
+.leaflet-popup-content-wrapper { border-radius: 16px !important; }
+.leaflet-popup-content { margin: 12px 14px !important; }
 
 /* ---------- Leaflet tweaks ---------- */
 .leaflet-container { background: #e8edf2; font-family: var(--font); }

@@ -530,7 +530,98 @@
         }).sort((a, b) => b.revenue - a.revenue).slice(0, 5),
       });
     },
+
+    adminEditUser(id, data) {
+      load();
+      const u = state.users.find((x) => x.id === Number(id));
+      if (u) { if (data.name) u.name = data.name; if (data.phone) u.phone = data.phone; save(); }
+      return Promise.resolve({ ok: true });
+    },
+
+    adminDeleteUser(id) {
+      load();
+      state.users = state.users.filter((x) => x.id !== Number(id));
+      state.rides = state.rides.filter((x) => x.user_id !== Number(id));
+      save();
+      return Promise.resolve({ ok: true });
+    },
+
+    adminEditDriver(id, data) {
+      load();
+      const d = state.drivers.find((x) => x.id === Number(id));
+      if (d) {
+        if (data.name) d.name = data.name;
+        if (data.vehicle_type) d.vehicle_type = data.vehicle_type;
+        if (data.vehicle_reg) d.vehicle_reg = data.vehicle_reg;
+        const u = state.users.find((x) => x.id === d.user_id);
+        if (u && data.name) u.name = data.name;
+        save();
+      }
+      return Promise.resolve({ ok: true });
+    },
+
+    adminDeleteDriver(id) {
+      load();
+      const d = state.drivers.find((x) => x.id === Number(id));
+      if (d) {
+        state.rides.forEach((r) => { if (r.driver_id === d.id) r.driver_id = null; });
+        state.drivers = state.drivers.filter((x) => x.id !== d.id);
+        const u = state.users.find((x) => x.id === d.user_id);
+        if (u) u.role = "passenger";
+        save();
+      }
+      return Promise.resolve({ ok: true });
+    },
+
+    sendMessage(data) {
+      load();
+      if (!state.messages) state.messages = [];
+      const u = sessionUser();
+      const msg = {
+        id: nextId(state.messages), ride_id: data.ride_id || null,
+        conversation_type: data.conversation_type || (data.ride_id ? "ride" : "support"),
+        sender_user_id: u ? u.id : null, sender_role: u ? u.role : "passenger",
+        content: data.content, created_at: isoNow(),
+      };
+      state.messages.push(msg);
+      const result = { ...msg };
+      if (msg.conversation_type === "support") {
+        const bot = { id: nextId(state.messages), ride_id: null, conversation_type: "support",
+          sender_user_id: null, sender_role: "bot", content: _botReplyLocal(data.content), created_at: isoNow() };
+        state.messages.push(bot);
+        result.bot_reply = bot;
+      }
+      save();
+      return Promise.resolve(result);
+    },
+
+    getMessages(rideId) {
+      load();
+      const u = sessionUser();
+      const msgs = (state.messages || []).filter((m) => {
+        if (rideId) return m.ride_id === Number(rideId) && m.conversation_type === "ride";
+        return m.conversation_type === "support" && (m.sender_user_id === (u ? u.id : null) || m.sender_role === "bot");
+      });
+      return Promise.resolve(msgs);
+    },
+
+    adminMessages() {
+      load();
+      return Promise.resolve(state.messages || []);
+    },
   };
+
+  const BOT_RESPONSES_LOCAL = {
+    hello: "Hello! Welcome to iSafedrive support.",
+    hi: "Hi there! How can I assist you?",
+    help: "I can help with ride issues, payments, account questions, and more.",
+    default: "Thank you for your message. Our support team will review it.",
+  };
+  function _botReplyLocal(content) {
+    const t = (content || "").toLowerCase();
+    for (const [k, v] of Object.entries(BOT_RESPONSES_LOCAL)) { if (k !== "default" && t.includes(k)) return v; }
+    return BOT_RESPONSES_LOCAL.default;
+  }
 
   function sanitizeUser(u) {
     const { password, ...rest } = u;
