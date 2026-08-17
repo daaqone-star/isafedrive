@@ -153,7 +153,7 @@
   async function searchLocation(query, which, resultsEl) {
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=5&countrycodes=ng`,
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=5`,
         { headers: { "User-Agent": "iSafedriveApp/1.0" } }
       );
       const data = await res.json();
@@ -198,7 +198,7 @@
   async function geocodeQuery(query, which) {
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query + " Nigeria")}&limit=1`,
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=1`,
         { headers: { "User-Agent": "iSafedriveApp/1.0" } }
       );
       const data = await res.json();

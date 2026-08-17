@@ -680,6 +680,18 @@ table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; min
 .notif-item .ni-time { font-size: 10px; color: var(--muted); margin-top: 4px; }
 .notif-item.unread { background: var(--blue-soft); border-left: 3px solid var(--blue); }
 
+/* ---------- Driver location search bar ---------- */
+.drv-search-bar {
+  position: absolute; top: 10px; left: 10px; right: 50px; z-index: 600;
+}
+.drv-location-input {
+  width: 100%; padding: 10px 14px; border-radius: 20px; border: 1px solid var(--line);
+  background: rgba(255,255,255,.95); font-size: 13px; font-family: inherit;
+  box-shadow: 0 2px 12px rgba(0,0,0,.1); backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px); outline: none;
+}
+.drv-location-input:focus { border-color: var(--blue); }
+
 /* ---------- Location search ---------- */
 .search-wrap { position: relative; }
 .search-results {

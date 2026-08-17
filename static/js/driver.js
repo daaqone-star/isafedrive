@@ -19,6 +19,7 @@
     tripCode: null,
     geoWatchId: null,
     _inited: false,
+    _gpsReady: false,
   };
 
   function el(id) { return document.getElementById(id); }
@@ -46,10 +47,6 @@
     } catch (e) { /* audio unavailable */ }
   }
 
-  function generateTripCode() {
-    return Math.floor(1000 + Math.random() * 9000).toString();
-  }
-
   function notify(title, body) {
     if (window.App && typeof window.App.notify === "function") {
       window.App.notify(title, body);
@@ -69,11 +66,15 @@
     }
     D._inited = true;
 
+    // Create map centered on user's last known position (or default)
     D.map = MK.createMap(el("drv-map"), [6.5244, 3.3792], 14);
     setTimeout(() => D.map?.invalidateSize(), 400);
     setTimeout(() => D.map?.invalidateSize(), 1200);
 
-    el("btn-drv-locate").onclick = () => { if (D.pos) D.map.setView([D.pos.lat, D.pos.lng], 15); };
+    el("btn-drv-locate").onclick = () => {
+      if (D.pos) D.map.setView([D.pos.lat, D.pos.lng], 15);
+      else useGeolocation();
+    };
     el("btn-go-online").onclick = toggleOnline;
     el("btn-drv-accept").onclick = acceptRequest;
     el("btn-drv-decline").onclick = declineRequest;
@@ -83,28 +84,67 @@
     document.querySelectorAll("#driver-app .bt-tab").forEach((t) => {
       t.onclick = () => drvTab(t.dataset.tab);
     });
-    loadDriver();
+
+    // Location search for driver
+    setupDriverLocationSearch();
+
+    // Step 1: Get GPS FIRST, then load driver profile
+    getGPSFirst();
+  }
+
+  // ---------------------------------------------------------------
+  // Get GPS position before loading driver data from server
+  // ---------------------------------------------------------------
+  function getGPSFirst() {
+    if (!navigator.geolocation) {
+      loadDriver();
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        D.base = { ...D.pos };
+        D._gpsReady = true;
+        // Send GPS to server BEFORE loading driver profile
+        sendLocationToServer();
+        // Now load driver data (which will use the GPS-updated position)
+        loadDriver();
+      },
+      () => {
+        // GPS failed — load driver with whatever position is in the DB
+        loadDriver();
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
   }
 
   async function loadDriver() {
     try {
       const me = await api.me();
       D.driver = me.driver;
+
+      // If GPS gave us a real position, use that instead of the DB position
+      if (D._gpsReady && D.pos) {
+        D.base = { lat: D.pos.lat, lng: D.pos.lng };
+        // Update the DB position with real GPS
+        sendLocationToServer();
+      } else {
+        // Use DB position as fallback
+        D.pos = { lat: D.driver.lat, lng: D.driver.lng };
+        D.base = { lat: D.driver.lat, lng: D.driver.lng };
+      }
+
       D.online = !!D.driver.online;
-      D.pos = { lat: D.driver.lat, lng: D.driver.lng };
-      D.base = { lat: D.driver.lat, lng: D.driver.lng };
       renderSelf();
       applyOnlineUI();
       startWatchers();
-
-      // Immediately start GPS and send location to server
-      startGPS();
+      startGPSWatch();
     } catch (e) {
       U.toast("Could not load driver profile");
     }
   }
 
-  function startGPS() {
+  function startGPSWatch() {
     if (!navigator.geolocation) return;
     if (D.geoWatchId) navigator.geolocation.clearWatch(D.geoWatchId);
     D.geoWatchId = navigator.geolocation.watchPosition(
@@ -119,6 +159,136 @@
     );
   }
 
+  function useGeolocation() {
+    if (!navigator.geolocation) {
+      U.toast("Location unavailable");
+      return;
+    }
+    U.toast("Detecting your location…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        D.base = { ...D.pos };
+        renderSelf();
+        sendLocationToServer();
+        D.map.setView([D.pos.lat, D.pos.lng], 15);
+        U.toast("📍 Location updated");
+      },
+      () => { U.toast("Could not detect location"); },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
+
+  // ---------------------------------------------------------------
+  // Driver location search
+  // ---------------------------------------------------------------
+  function setupDriverLocationSearch() {
+    const input = el("drv-location-input");
+    const results = el("drv-location-results");
+    if (!input || !results) return;
+
+    let debounce = null;
+
+    input.addEventListener("input", () => {
+      clearTimeout(debounce);
+      const q = input.value.trim();
+      if (q.length < 3) { results.classList.add("hidden"); return; }
+      debounce = setTimeout(() => searchDriverLocation(q), 350);
+    });
+
+    input.addEventListener("focus", () => {
+      if (results.children.length > 0 && input.value.trim().length >= 3) {
+        results.classList.remove("hidden");
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!input.contains(e.target) && !results.contains(e.target)) {
+        results.classList.add("hidden");
+      }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        results.classList.add("hidden");
+        const q = input.value.trim();
+        if (!q) return;
+        geocodeDriverQuery(q);
+      }
+    });
+  }
+
+  async function searchDriverLocation(query) {
+    const results = el("drv-location-results");
+    if (!results) return;
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=5`,
+        { headers: { "User-Agent": "iSafedriveApp/1.0" } }
+      );
+      const data = await res.json();
+      if (!data.length) {
+        results.innerHTML = `<div class="sr-item"><span class="sr-name">No results</span></div>`;
+        results.classList.remove("hidden");
+        return;
+      }
+      results.innerHTML = data.map((r, i) => {
+        const parts = (r.display_name || "").split(",");
+        const name = parts[0] || query;
+        const addr = parts.slice(1, 4).join(",").trim();
+        return `<div class="sr-item" data-idx="${i}">
+          <div class="sr-name">${U.escapeHtml(name)}</div>
+          <div class="sr-addr">${U.escapeHtml(addr)}</div>
+        </div>`;
+      }).join("");
+      results.classList.remove("hidden");
+
+      results.querySelectorAll(".sr-item").forEach((item) => {
+        item.onclick = () => {
+          const idx = parseInt(item.dataset.idx);
+          const r = data[idx];
+          if (!r) return;
+          D.pos = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+          D.base = { ...D.pos };
+          renderSelf();
+          sendLocationToServer();
+          D.map.setView([D.pos.lat, D.pos.lng], 15);
+          const name = (r.display_name || "").split(",")[0].trim();
+          el("drv-location-input").value = name;
+          results.classList.add("hidden");
+          U.toast("📍 Location set: " + name);
+        };
+      });
+    } catch (e) {
+      results.innerHTML = `<div class="sr-item"><span class="sr-name">Search failed</span></div>`;
+      results.classList.remove("hidden");
+    }
+  }
+
+  async function geocodeDriverQuery(query) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=1`,
+        { headers: { "User-Agent": "iSafedriveApp/1.0" } }
+      );
+      const data = await res.json();
+      if (data.length) {
+        D.pos = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        D.base = { ...D.pos };
+        renderSelf();
+        sendLocationToServer();
+        D.map.setView([D.pos.lat, D.pos.lng], 15);
+        U.toast("📍 Location set: " + query);
+      } else {
+        U.toast("Location not found");
+      }
+    } catch (e) {
+      U.toast("Could not find location");
+    }
+  }
+
+  // ---------------------------------------------------------------
   function renderSelf() {
     if (!D.pos) return;
     if (!D.selfMarker) {
@@ -142,13 +312,14 @@
   }
 
   async function toggleOnline() {
+    // Make sure server has our GPS position before toggling
+    sendLocationToServer();
     try {
       const drv = await api.toggleDriver(!D.online);
       D.driver = drv;
       D.online = !!drv.online;
       applyOnlineUI();
       renderSelf();
-      sendLocationToServer();
       U.toast(D.online ? "You're online" : "You're offline");
       if (D.online) {
         pollRequests();
@@ -208,7 +379,7 @@
     if (D.currentRequest) return;
     if (!D.pos) return;
     try {
-      const pending = await api.pendingRides(D.pos.lat, D.pos.lng, 10);
+      const pending = await api.pendingRides(D.pos.lat, D.pos.lng, 15);
       if (pending.length) {
         D.currentRequest = pending[0];
         renderRequest(D.currentRequest);
@@ -244,10 +415,11 @@
       const ride = await api.acceptRide(id);
       D.currentRequest = null;
       D.activeRide = ride;
-      D.tripCode = ride.trip_code || generateTripCode();
+      // Use server-generated trip code
+      D.tripCode = ride.trip_code || null;
       el("drv-request").classList.add("hidden");
       enterActiveTrip();
-      notify("Ride Accepted!", `Drive to pickup — Verification code: ${D.tripCode}`);
+      notify("Ride Accepted!", `Drive to pickup — Code: ${D.tripCode || "pending"}`);
       U.toast("Ride accepted!");
     } catch (e) {
       U.toast(e.error || "Could not accept ride");
