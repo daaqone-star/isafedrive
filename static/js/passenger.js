@@ -19,9 +19,13 @@
     promoCode: "",
     lat: 6.5244,
     lng: 3.3792,
+    searchTimers: {},
+    _inited: false,
   };
 
   function el(id) { return document.getElementById(id); }
+  function show(id) { el(id)?.classList.remove("hidden"); }
+  function hide(id) { el(id)?.classList.add("hidden"); }
 
   function notify(title, body) {
     window.App?.notify(title, body);
@@ -29,8 +33,15 @@
 
   // ---------------------------------------------------------------
   function init() {
-    P.map = MK.createMap(el("pax-map"));
-    setTimeout(() => P.map?.invalidateSize(), 300);
+    if (P._inited) {
+      setTimeout(() => P.map?.invalidateSize(), 200);
+      return;
+    }
+    P._inited = true;
+
+    P.map = MK.createMap(el("pax-map"), [P.lat, P.lng], 14);
+    setTimeout(() => P.map?.invalidateSize(), 400);
+    setTimeout(() => P.map?.invalidateSize(), 1200);
     P.map.on("click", onMapClick);
     P.nearbyLayer = L.layerGroup().addTo(P.map);
 
@@ -38,9 +49,6 @@
 
     buildVehicleOptions();
 
-    el("pickup-input").addEventListener("focus", (e) => {
-      if (!P.pickup) useGeolocation(false);
-    });
     el("btn-book").onclick = book;
     el("btn-cancel-request").onclick = () => cancelActive("Passenger cancelled request");
     el("btn-cancel-ride").onclick = () => cancelActive("Passenger cancelled");
@@ -88,11 +96,128 @@
       t.onclick = () => paxTab(t.dataset.tab);
     });
 
+    // Location search — pickup
+    setupSearch("pickup");
+    // Location search — dropoff
+    setupSearch("dropoff");
+
     el("btn-book").disabled = true;
     syncPayUI();
     useGeolocation(true);
   }
 
+  // ---------------------------------------------------------------
+  // Location search with Nominatim
+  // ---------------------------------------------------------------
+  function setupSearch(which) {
+    const input = el(which === "pickup" ? "pickup-input" : "dropoff-input");
+    const results = el(which === "pickup" ? "pickup-results" : "dropoff-results");
+    if (!input || !results) return;
+
+    let debounce = null;
+
+    input.addEventListener("input", () => {
+      clearTimeout(debounce);
+      const q = input.value.trim();
+      if (q.length < 3) { results.classList.add("hidden"); return; }
+      debounce = setTimeout(() => searchLocation(q, which, results), 350);
+    });
+
+    input.addEventListener("focus", () => {
+      const q = input.value.trim();
+      if (q.length >= 3 && results.children.length > 0) {
+        results.classList.remove("hidden");
+      }
+    });
+
+    // Close results when clicking outside
+    document.addEventListener("click", (e) => {
+      if (!input.contains(e.target) && !results.contains(e.target)) {
+        results.classList.add("hidden");
+      }
+    });
+
+    // When user presses Enter, use the text as-is and reverse geocode later
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        results.classList.add("hidden");
+        const q = input.value.trim();
+        if (!q) return;
+        // Try to geocode the text query via Nominatim search
+        geocodeQuery(q, which);
+      }
+    });
+  }
+
+  async function searchLocation(query, which, resultsEl) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=5&countrycodes=ng`,
+        { headers: { "User-Agent": "iSafedriveApp/1.0" } }
+      );
+      const data = await res.json();
+      if (!data.length) {
+        resultsEl.innerHTML = `<div class="sr-item"><span class="sr-name">No results found</span></div>`;
+        resultsEl.classList.remove("hidden");
+        return;
+      }
+      resultsEl.innerHTML = data.map((r, i) => {
+        const parts = (r.display_name || "").split(",");
+        const name = parts[0] || query;
+        const addr = parts.slice(1, 4).join(",").trim();
+        return `<div class="sr-item" data-idx="${i}">
+          <div class="sr-name">${U.escapeHtml(name)}</div>
+          <div class="sr-addr">${U.escapeHtml(addr)}</div>
+        </div>`;
+      }).join("");
+      resultsEl.classList.remove("hidden");
+
+      // Click handler for each result
+      resultsEl.querySelectorAll(".sr-item").forEach((item) => {
+        item.onclick = () => {
+          const idx = parseInt(item.dataset.idx);
+          const r = data[idx];
+          if (!r) return;
+          const latlng = { lat: parseFloat(r.lat), lng: parseFloat(r.lon) };
+          const name = (r.display_name || "").split(",")[0].trim();
+          if (which === "pickup") {
+            placePickup(latlng, name);
+          } else {
+            placeDropoff(latlng, name);
+          }
+          resultsEl.classList.add("hidden");
+        };
+      });
+    } catch (e) {
+      resultsEl.innerHTML = `<div class="sr-item"><span class="sr-name">Search failed — try again</span></div>`;
+      resultsEl.classList.remove("hidden");
+    }
+  }
+
+  async function geocodeQuery(query, which) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query + " Nigeria")}&limit=1`,
+        { headers: { "User-Agent": "iSafedriveApp/1.0" } }
+      );
+      const data = await res.json();
+      if (data.length) {
+        const latlng = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        if (which === "pickup") {
+          placePickup(latlng, query);
+        } else {
+          placeDropoff(latlng, query);
+        }
+      } else {
+        U.toast("Location not found — try a different search");
+      }
+    } catch (e) {
+      U.toast("Could not find location");
+    }
+  }
+
+  // ---------------------------------------------------------------
   function syncPayUI() {
     const m = el("pay-method").value;
     el("pay-card").classList.toggle("hidden", m !== "card");
@@ -148,8 +273,8 @@
 
   function useGeolocation(centerMap) {
     if (!navigator.geolocation) {
-      U.toast("Location unavailable — using default position");
-      placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
+      U.toast("Location unavailable — tap map or search to set location");
+      P.map.setView([P.lat, P.lng], 14);
       return;
     }
     U.toast("Detecting your location…");
@@ -157,19 +282,23 @@
       (pos) => {
         P.lat = pos.coords.latitude;
         P.lng = pos.coords.longitude;
-        if (centerMap) P.map.setView([P.lat, P.lng], 15);
+        if (centerMap) {
+          P.map.setView([P.lat, P.lng], 15);
+          setTimeout(() => P.map?.invalidateSize(), 200);
+        }
         if (!P.pickup) {
           placePickup({ lat: P.lat, lng: P.lng }, "Current location");
           U.toast("📍 Current location set as pickup");
         } else {
-          U.toast("📍 Current location found");
+          U.toast("📍 Location updated");
         }
       },
       () => {
-        U.toast("Could not detect location — tap the map to set pickup");
+        U.toast("Could not detect location — use search or tap map");
+        if (centerMap) P.map.setView([P.lat, P.lng], 14);
         if (!P.pickup) placePickup({ lat: P.lat, lng: P.lng }, "Lagos, Nigeria");
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   }
 
@@ -189,23 +318,31 @@
   }
 
   function placePickup(p, label) {
-    P.pickup = p;
+    P.pickup = { lat: p.lat, lng: p.lng };
     if (P.markers.pickup) P.map.removeLayer(P.markers.pickup);
     P.markers.pickup = L.marker([p.lat, p.lng], { icon: MK.passengerIcon() }).addTo(P.map);
-    if (label) { el("pickup-input").value = label; }
-    else reverseGeocode(p, (a) => { el("pickup-input").value = a; P.pickup.address = a; });
+    if (label) {
+      el("pickup-input").value = label;
+    } else {
+      reverseGeocode(p, (a) => { el("pickup-input").value = a; });
+    }
+    P.map.setView([p.lat, p.lng], 15);
     refreshNearby();
     updateFare();
   }
 
   function placeDropoff(p) {
-    P.dropoff = p;
+    P.dropoff = { lat: p.lat, lng: p.lng };
     if (P.markers.dropoff) P.map.removeLayer(P.markers.dropoff);
     P.markers.dropoff = L.marker([p.lat, p.lng], { icon: MK.dropIcon("B") }).addTo(P.map);
-    reverseGeocode(p, (a) => { el("dropoff-input").value = a; P.dropoff.address = a; });
+    if (p.label) {
+      el("dropoff-input").value = p.label;
+    } else {
+      reverseGeocode(p, (a) => { el("dropoff-input").value = a; });
+    }
     drawRoute();
     updateFare();
-    MK.fitAll(P.map, [P.pickup, P.dropoff]);
+    if (P.pickup) MK.fitAll(P.map, [P.pickup, P.dropoff]);
   }
 
   function drawRoute() {
@@ -219,9 +356,10 @@
   async function refreshNearby() {
     if (!P.pickup || P.activeRide) return;
     try {
-      const drv = await api.driversNearby(P.pickup.lat, P.pickup.lng, "any", 6);
+      const drv = await api.driversNearby(P.pickup.lat, P.pickup.lng, "any", 10);
       P.nearbyLayer.clearLayers();
-      drv.slice(0, 12).forEach((d) => {
+      if (drv.length === 0) return;
+      drv.slice(0, 15).forEach((d) => {
         const m = L.marker([d.lat, d.lng], { icon: MK.driverIcon("available") }).addTo(P.nearbyLayer);
         const popupHtml = `<div class="driver-popup">
           <div class="dp-header"><b>${U.escapeHtml(d.name)}</b><span class="dp-rating">★ ${(d.rating || 5).toFixed(1)}</span></div>
@@ -296,7 +434,7 @@
   function applyPromoCode() {
     const raw = el("promo-input").value.trim();
     const msg = el("promo-msg");
-    const res = U.applyPromo(1, raw); // just validates the code
+    const res = U.applyPromo(1, raw);
     msg.classList.remove("ok", "bad");
     if (!raw) { P.promoCode = ""; msg.textContent = ""; updateFare(); return; }
     if (res.code) {
@@ -318,8 +456,8 @@
     const method = el("pay-method").value;
     if (method === "card" && !validateCard()) return;
     const payload = {
-      pickup: { lat: P.pickup.lat, lng: P.pickup.lng, address: el("pickup-input").value },
-      dropoff: { lat: P.dropoff.lat, lng: P.dropoff.lng, address: el("dropoff-input").value },
+      pickup: { lat: P.pickup.lat, lng: P.pickup.lng, address: el("pickup-input").value || "Pickup" },
+      dropoff: { lat: P.dropoff.lat, lng: P.dropoff.lng, address: el("dropoff-input").value || "Dropoff" },
       vehicle_type: P.vehicleType,
       payment_method: method,
       promo_code: P.promoCode || null,
@@ -359,6 +497,7 @@
   }
 
   function renderRide(ride) {
+    const prevStatus = P.activeRide ? P.activeRide.status : null;
     P.activeRide = ride;
     if (ride.status === "requesting") {
       showSection("pax-searching");
@@ -370,7 +509,6 @@
       U.toast("Your ride was cancelled");
       return;
     }
-    const prevStatus = P.activeRide ? P.activeRide.status : null;
     showSection("pax-active");
     updateActiveCard(ride);
     trackDriver(ride);
@@ -514,6 +652,8 @@
     el("card-cvv").value = "";
     syncPayUI();
     showSection("pax-booking");
+    P.nearbyLayer.clearLayers();
+    setTimeout(() => P.map?.invalidateSize(), 200);
   }
 
   // ---------------------------------------------------------------
@@ -525,7 +665,12 @@
     el("pax-profile").classList.toggle("hidden", tab !== "profile");
     if (tab === "trips") renderTrips();
     if (tab === "profile") renderProfile();
-    if (bookingVisible) setTimeout(() => P.map?.invalidateSize(), 150);
+    if (bookingVisible) {
+      setTimeout(() => {
+        P.map?.invalidateSize();
+        if (P.pickup) refreshNearby();
+      }, 200);
+    }
   }
 
   async function renderTrips() {

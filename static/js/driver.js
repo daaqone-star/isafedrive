@@ -18,6 +18,7 @@
     base: null,
     tripCode: null,
     geoWatchId: null,
+    _inited: false,
   };
 
   function el(id) { return document.getElementById(id); }
@@ -55,8 +56,23 @@
     }
   }
 
+  function sendLocationToServer() {
+    if (D.pos && api.serverMode()) {
+      api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
+    }
+  }
+
   function init() {
-    D.map = MK.createMap(el("drv-map"));
+    if (D._inited) {
+      setTimeout(() => D.map?.invalidateSize(), 200);
+      return;
+    }
+    D._inited = true;
+
+    D.map = MK.createMap(el("drv-map"), [6.5244, 3.3792], 14);
+    setTimeout(() => D.map?.invalidateSize(), 400);
+    setTimeout(() => D.map?.invalidateSize(), 1200);
+
     el("btn-drv-locate").onclick = () => { if (D.pos) D.map.setView([D.pos.lat, D.pos.lng], 15); };
     el("btn-go-online").onclick = toggleOnline;
     el("btn-drv-accept").onclick = acceptRequest;
@@ -80,9 +96,27 @@
       renderSelf();
       applyOnlineUI();
       startWatchers();
+
+      // Immediately start GPS and send location to server
+      startGPS();
     } catch (e) {
       U.toast("Could not load driver profile");
     }
+  }
+
+  function startGPS() {
+    if (!navigator.geolocation) return;
+    if (D.geoWatchId) navigator.geolocation.clearWatch(D.geoWatchId);
+    D.geoWatchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        D.base = { ...D.pos };
+        renderSelf();
+        sendLocationToServer();
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
   }
 
   function renderSelf() {
@@ -114,8 +148,13 @@
       D.online = !!drv.online;
       applyOnlineUI();
       renderSelf();
+      sendLocationToServer();
       U.toast(D.online ? "You're online" : "You're offline");
-      if (D.online) pollRequests();
+      if (D.online) {
+        pollRequests();
+      } else {
+        clearInterval(D.pollTimer);
+      }
       refreshEarnings();
     } catch (e) {
       U.toast(e.error || "Could not change status");
@@ -134,8 +173,13 @@
     clearInterval(D.pollTimer);
     clearInterval(D.meTimer);
 
-    D.pollTimer = setInterval(() => { if (D.online && !D.activeRide) pollRequests(); }, 3000);
+    // Poll for ride requests every 2 seconds when online
+    D.pollTimer = setInterval(() => {
+      if (D.online && !D.activeRide) pollRequests();
+      if (D.online) sendLocationToServer();
+    }, 2000);
 
+    // Refresh driver state from server
     D.meTimer = setInterval(async () => {
       try {
         const me = await api.me();
@@ -146,24 +190,8 @@
           if (!D.activeRide && D.driver.status === "busy") checkActiveFromServer();
         }
       } catch (e) { /* ignore */ }
-    }, 3000);
+    }, 5000);
     setInterval(refreshEarnings, 30000);
-
-    if (navigator.geolocation) {
-      D.geoWatchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          D.base = { ...D.pos };
-          renderSelf();
-          if (D.activeRide) renderActive();
-          if (api.serverMode()) {
-            api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
-          }
-        },
-        () => {},
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
-      );
-    }
   }
 
   async function checkActiveFromServer() {
@@ -180,12 +208,12 @@
     if (D.currentRequest) return;
     if (!D.pos) return;
     try {
-      const pending = await api.pendingRides(D.pos.lat, D.pos.lng, 8);
+      const pending = await api.pendingRides(D.pos.lat, D.pos.lng, 10);
       if (pending.length) {
         D.currentRequest = pending[0];
         renderRequest(D.currentRequest);
         playChime();
-        notify("New Ride Request", `Fare: ${U.ngn(pending[0].fare)} — ${U.km(pending[0].distance_to_pickup_km)} to pickup`);
+        notify("🚗 New Ride Request!", `${pending[0].passenger_name || "Passenger"} needs a ride — ${U.ngn(pending[0].fare)} fare`);
       }
     } catch (e) { /* ignore */ }
   }
@@ -216,10 +244,10 @@
       const ride = await api.acceptRide(id);
       D.currentRequest = null;
       D.activeRide = ride;
-      D.tripCode = generateTripCode();
+      D.tripCode = ride.trip_code || generateTripCode();
       el("drv-request").classList.add("hidden");
       enterActiveTrip();
-      notify("Ride Accepted", `Drive to pickup — Code: ${D.tripCode}`);
+      notify("Ride Accepted!", `Drive to pickup — Verification code: ${D.tripCode}`);
       U.toast("Ride accepted!");
     } catch (e) {
       U.toast(e.error || "Could not accept ride");
@@ -307,8 +335,8 @@
     const target = rideTarget();
     const dist = target && D.pos ? U.haversine(D.pos, target) : 0;
     const statusMap = {
-      assigned: ["Heading to pickup", `Driver ${U.escapeHtml(d.name || "")} · ${d.vehicle_type || ""}`],
-      driver_arriving: ["Heading to pickup", `${U.km(dist)} away · ${d.vehicle_type || ""}`],
+      assigned: ["Heading to pickup", `${U.km(dist)} away`],
+      driver_arriving: ["Heading to pickup", `${U.km(dist)} away`],
       arrived: ["Waiting at pickup", "Passenger is on the way"],
       in_transit: ["On the way to destination", `${U.km(dist)} remaining`],
       completed: ["Trip completed", "Collect payment to finish"],
@@ -321,25 +349,14 @@
     const btn = el("btn-drv-status");
     btn.textContent = r.status === "in_transit" ? "Complete trip" : r.status === "arrived" ? "Start trip" : "Arrived at pickup";
 
+    // Trip code display
     const codeEl = el("drv-trip-code");
     if (codeEl) {
-      if (r.status !== "completed" && r.status !== "cancelled" && D.tripCode) {
+      const code = D.tripCode || r.trip_code;
+      if (r.status !== "completed" && r.status !== "cancelled" && code) {
         codeEl.classList.remove("hidden");
-        codeEl.innerHTML = `<span class="trip-code-value">${D.tripCode}</span>
-          <input id="drv-verify-input" class="trip-code-input" type="text" maxlength="4" placeholder="Passenger code" />
-          <button id="btn-drv-verify" class="btn btn-sm">Verify</button>`;
-        const verifyBtn = el("btn-drv-verify");
-        if (verifyBtn) {
-          verifyBtn.onclick = () => {
-            const input = el("drv-verify-input");
-            if (input && input.value.trim() === D.tripCode) {
-              U.toast("Code verified!");
-              codeEl.innerHTML = `<span class="trip-code-value">${D.tripCode}</span> <span class="verified-label">✓ Verified</span>`;
-            } else {
-              U.toast("Code does not match");
-            }
-          };
-        }
+        codeEl.innerHTML = `<span class="tc-label">Your verification code</span>
+          <span class="tc-code">${code}</span>`;
       } else {
         codeEl.classList.add("hidden");
         codeEl.innerHTML = "";
@@ -400,6 +417,7 @@
     el("drv-idle-card").classList.toggle("hidden", D.online);
     MK.clearLayer(D.map);
     renderSelf();
+    setTimeout(() => D.map?.invalidateSize(), 200);
   }
 
   // ---------------------------------------------------------------
@@ -411,7 +429,10 @@
     el("drv-trips-view").classList.toggle("hidden", tab !== "trips");
     el("drv-profile-view").classList.toggle("hidden", tab !== "profile");
     if (home) {
-      setTimeout(() => D.map?.invalidateSize(), 200);
+      setTimeout(() => {
+        D.map?.invalidateSize();
+        renderSelf();
+      }, 200);
     } else if (tab === "earnings") renderEarnings();
     else if (tab === "trips") renderTrips();
     else if (tab === "profile") renderProfile();

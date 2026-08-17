@@ -163,8 +163,14 @@
                 <span class="dot dot-b"></span>
               </div>
               <div class="where-inputs">
-                <input id="pickup-input" class="where-input" placeholder="Pickup location" />
-                <input id="dropoff-input" class="where-input" placeholder="Where to?" />
+                <div class="search-wrap">
+                  <input id="pickup-input" class="where-input" placeholder="📍 Search pickup location…" autocomplete="off" />
+                  <div id="pickup-results" class="search-results hidden"></div>
+                </div>
+                <div class="search-wrap">
+                  <input id="dropoff-input" class="where-input" placeholder="🔍 Search destination…" autocomplete="off" />
+                  <div id="dropoff-results" class="search-results hidden"></div>
+                </div>
               </div>
             </div>
             <div class="vehicle-options" id="vehicle-options"></div>

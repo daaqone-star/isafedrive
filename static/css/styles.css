@@ -680,6 +680,23 @@ table.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; min
 .notif-item .ni-time { font-size: 10px; color: var(--muted); margin-top: 4px; }
 .notif-item.unread { background: var(--blue-soft); border-left: 3px solid var(--blue); }
 
+/* ---------- Location search ---------- */
+.search-wrap { position: relative; }
+.search-results {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 500;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.search-results .sr-item {
+  padding: 10px 14px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--bg);
+  transition: background .15s;
+}
+.search-results .sr-item:last-child { border-bottom: none; }
+.search-results .sr-item:hover, .search-results .sr-item:active { background: var(--blue-soft); }
+.search-results .sr-item .sr-name { font-weight: 600; color: var(--text); }
+.search-results .sr-item .sr-addr { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
 /* ---------- Desktop layout ---------- */
 @media (min-width: 900px) {
   #passenger-app, #driver-app {
