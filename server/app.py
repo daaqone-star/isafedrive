@@ -365,6 +365,9 @@ def api_accept_ride(ride_id):
         (drv["id"], ride_id),
     )
     conn.execute("UPDATE drivers SET status='busy', trips=trips+1 WHERE id=?", (drv["id"],))
+    import random
+    trip_code = f"{random.randint(1000, 9999)}"
+    conn.execute("UPDATE rides SET trip_code=? WHERE id=?", (trip_code, ride_id))
     conn.execute(
         "INSERT INTO ride_events(ride_id, driver_id, action) VALUES(?,?, 'accepted')",
         (ride_id, drv["id"]),
@@ -402,6 +405,8 @@ def api_ride_status(ride_id):
         "INSERT INTO ride_events(ride_id, driver_id, action) VALUES(?,?,?)",
         (ride_id, ride["driver_id"], new_status),
     )
+    if new_status == "arrived":
+        conn.execute("UPDATE rides SET trip_code=trip_code WHERE id=?", (ride_id,))
     conn.commit()
     ride = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
     conn.close()
@@ -905,6 +910,39 @@ def api_admin_messages():
     ).fetchall()
     conn.close()
     return jsonify([_to_dict(r) for r in rows])
+
+
+@app.get("/api/notifications")
+def api_notifications():
+    user = _auth_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    conn = db.get_conn()
+    notifs = []
+    if user["role"] == "passenger":
+        rides = conn.execute(
+            "SELECT id, status, trip_code, driver_id FROM rides WHERE user_id=? ORDER BY id DESC LIMIT 10",
+            (user["id"],),
+        ).fetchall()
+        for r in rides:
+            if r["status"] == "assigned":
+                notifs.append({"title": "Driver Found!", "body": "Your driver is heading to pickup", "type": "ride_assigned", "ride_id": r["id"]})
+            elif r["status"] == "arrived":
+                notifs.append({"title": "Driver Arrived!", "body": "Your driver is waiting at pickup", "type": "driver_arrived", "ride_id": r["id"]})
+            elif r["status"] == "completed":
+                notifs.append({"title": "Trip Complete", "body": "Thanks for riding with iSafedrive", "type": "ride_completed", "ride_id": r["id"]})
+    elif user["role"] == "driver":
+        drv = conn.execute("SELECT id FROM drivers WHERE user_id=?", (user["id"],)).fetchone()
+        if drv:
+            rides = conn.execute(
+                "SELECT id, status FROM rides WHERE driver_id=? AND status IN ('assigned','completed') ORDER BY id DESC LIMIT 10",
+                (drv["id"],),
+            ).fetchall()
+            for r in rides:
+                if r["status"] == "completed":
+                    notifs.append({"title": "Trip Completed", "body": f"Ride #{r['id']} completed successfully", "type": "ride_completed", "ride_id": r["id"]})
+    conn.close()
+    return jsonify(notifs)
 
 
 # ---------------------------------------------------------------------------

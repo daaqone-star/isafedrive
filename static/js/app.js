@@ -2,6 +2,8 @@
 (function (global) {
   const U = global.U;
   const api = global.api;
+  const SESSION_KEY = "isafedrive_last_role";
+  const NOTIF_KEY = "isafedrive_notifications";
 
   function el(id) { return document.getElementById(id); }
   function show(elId) { el(elId).classList.remove("hidden"); }
@@ -57,7 +59,6 @@
     el("register-btn").textContent = cfg.regBtn;
     el("auth-role-note").textContent = cfg.regNote;
 
-    // Admin accounts are not self-registerable — hide the create-account tab.
     const regTab = document.querySelector('.at-tab[data-mode="register"]');
     regTab.classList.toggle("hidden", r.role === "admin");
 
@@ -74,7 +75,6 @@
       t.classList.toggle("active", t.dataset.mode === mode));
     el("login-form").classList.toggle("hidden", mode !== "login");
     el("register-form").classList.toggle("hidden", mode !== "register");
-    // Driver-only fields appear only on the driver register screen.
     el("reg-driver").classList.toggle("hidden", r.role !== "driver");
   }
 
@@ -84,12 +84,72 @@
     location.hash = target;
   }
 
-  // Role cards -> per-role sign-in pages (hash directories).
+  /* ---- Notifications ---- */
+  function _loadNotifs() {
+    try { return JSON.parse(sessionStorage.getItem(NOTIF_KEY)) || []; } catch (e) { return []; }
+  }
+
+  function _saveNotifs(arr) {
+    sessionStorage.setItem(NOTIF_KEY, JSON.stringify(arr));
+  }
+
+  function _updateBadge() {
+    const notifs = _loadNotifs();
+    const unread = notifs.filter((n) => !n.read).length;
+    const badge = el("notif-badge");
+    if (badge) {
+      badge.textContent = unread;
+      badge.style.display = unread > 0 ? "" : "none";
+    }
+  }
+
+  function notify(title, body) {
+    const notifs = _loadNotifs();
+    notifs.unshift({ title: title || "", body: body || "", time: Date.now(), read: false });
+    _saveNotifs(notifs);
+    _updateBadge();
+    if (U && U.toast) U.toast(title || "Notification");
+    else if (global.toast) global.toast(title || "Notification");
+  }
+
+  function toggleNotifs() {
+    const panel = el("notif-panel");
+    if (!panel) return;
+    const isHidden = panel.classList.contains("hidden");
+    if (isHidden) {
+      const notifs = _loadNotifs();
+      notifs.forEach((n) => (n.read = true));
+      _saveNotifs(notifs);
+      _updateBadge();
+      const list = el("notif-list");
+      if (list) {
+        list.innerHTML = "";
+        if (notifs.length === 0) {
+          list.innerHTML = '<div style="text-align:center;color:#888;padding:24px;">No notifications</div>';
+        } else {
+          notifs.forEach((n) => {
+            const d = document.createElement("div");
+            d.className = "notif-item" + (n.read ? "" : " unread");
+            d.innerHTML =
+              '<strong>' + (n.title || "") + '</strong><br><span>' + (n.body || "") + '</span><br><small>' +
+              new Date(n.time).toLocaleString() + "</small>";
+            list.appendChild(d);
+          });
+        }
+      }
+      show("notif-panel");
+    } else {
+      hide("notif-panel");
+    }
+  }
+
+  window.App = { toggleNotifs: toggleNotifs, notify: notify };
+
+  /* ---- Auth tabs / role cards ---- */
   document.querySelectorAll(".role-card").forEach((c) => {
     c.onclick = () => go(c.dataset.role + "/login");
   });
 
-  // Auth tabs toggle login <-> register for the current role directory.
   document.querySelectorAll(".auth-tabs .at-tab").forEach((t) => {
     t.onclick = () => {
       const r = parseRoute();
@@ -124,6 +184,8 @@
     try {
       const res = await api.login({ phone, password });
       api.saveSession(res.user);
+      const r = parseRoute();
+      if (r.role) sessionStorage.setItem(SESSION_KEY, r.role);
       enterApp(res.user);
     } catch (err) {
       el("login-error").textContent = err.error || "Login failed";
@@ -156,6 +218,7 @@
     try {
       const res = await api.register(payload);
       api.saveSession(res.user);
+      sessionStorage.setItem(SESSION_KEY, role);
       U.toast("Account created — welcome to iSafedrive!");
       enterApp(res.user);
     } catch (err) {
@@ -169,6 +232,8 @@
     hide("splash");
     hide("auth-screen");
     show("app-shell");
+    show("notif-fab");
+    _updateBadge();
     if (user.role === "driver") {
       el("drv-name").textContent = user.name;
       const pill = el("mode-pill-drv");
@@ -198,12 +263,23 @@
   }
 
   function logout() {
+    const saved = api.loadSession();
+    if (saved && saved.role) {
+      sessionStorage.setItem(SESSION_KEY, saved.role);
+    }
     api.clearSession();
     if (global.Pax && global.Pax.destroy) global.Pax.destroy();
     if (global.Drv && global.Drv.destroy) global.Drv.destroy();
     hide("app-shell");
+    hide("notif-fab");
+    hide("notif-panel");
     show("auth-screen");
-    go("");
+    const lastRole = sessionStorage.getItem(SESSION_KEY);
+    if (lastRole && ROLES[lastRole]) {
+      go(lastRole + "/login");
+    } else {
+      go("");
+    }
   }
 
   function boot() {
@@ -225,7 +301,12 @@
     setTimeout(() => {
       el("splash").classList.add("fade-out");
       show("auth-screen");
-      renderAuth();
+      const lastRole = sessionStorage.getItem(SESSION_KEY);
+      if (lastRole && ROLES[lastRole]) {
+        go(lastRole + "/login");
+      } else {
+        renderAuth();
+      }
     }, 3000);
   }
 

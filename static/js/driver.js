@@ -8,15 +8,16 @@
   const D = {
     map: null,
     selfMarker: null,
-    driver: null,       // driver record from me()
+    driver: null,
     online: false,
     activeRide: null,
     currentRequest: null,
     pollTimer: null,
-    moveTimer: null,
     meTimer: null,
-    pos: null,          // {lat, lng} current simulated position
+    pos: null,
     base: null,
+    tripCode: null,
+    geoWatchId: null,
   };
 
   function el(id) { return document.getElementById(id); }
@@ -42,6 +43,16 @@
         o.stop(t + 0.18);
       });
     } catch (e) { /* audio unavailable */ }
+  }
+
+  function generateTripCode() {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+  }
+
+  function notify(title, body) {
+    if (window.App && typeof window.App.notify === "function") {
+      window.App.notify(title, body);
+    }
   }
 
   function init() {
@@ -121,18 +132,16 @@
 
   function startWatchers() {
     clearInterval(D.pollTimer);
-    clearInterval(D.moveTimer);
     clearInterval(D.meTimer);
 
-    D.pollTimer = setInterval(() => { if (D.online) pollRequests(); }, 3000);
-    D.moveTimer = setInterval(moveTick, 2000);
+    D.pollTimer = setInterval(() => { if (D.online && !D.activeRide) pollRequests(); }, 3000);
+
     D.meTimer = setInterval(async () => {
       try {
         const me = await api.me();
         if (me.driver) {
           D.driver = me.driver;
           D.online = !!me.driver.online;
-          D.pos = { lat: me.driver.lat, lng: me.driver.lng };
           renderSelf();
           if (!D.activeRide && D.driver.status === "busy") checkActiveFromServer();
         }
@@ -146,6 +155,7 @@
           D.pos = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           D.base = { ...D.pos };
           renderSelf();
+          if (D.activeRide) renderActive();
           if (api.serverMode()) {
             api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
           }
@@ -156,8 +166,6 @@
     }
   }
 
-  // If a ride was already assigned to this driver (e.g. passenger app or
-  // another tab), pick it up.
   async function checkActiveFromServer() {
     try {
       const rides = await api.listRides();
@@ -170,12 +178,14 @@
   async function pollRequests() {
     if (D.activeRide) return;
     if (D.currentRequest) return;
+    if (!D.pos) return;
     try {
       const pending = await api.pendingRides(D.pos.lat, D.pos.lng, 8);
       if (pending.length) {
         D.currentRequest = pending[0];
         renderRequest(D.currentRequest);
         playChime();
+        notify("New Ride Request", `Fare: ${U.ngn(pending[0].fare)} — ${U.km(pending[0].distance_to_pickup_km)} to pickup`);
       }
     } catch (e) { /* ignore */ }
   }
@@ -189,7 +199,7 @@
     el("drv-req-pay").textContent =
       r.payment_method === "card" ? "💳 Card" : r.payment_method === "transfer" ? "🏦 Transfer" : "💵 Cash";
     el("drv-request").classList.remove("hidden");
-    // draw the request route on the map
+
     MK.clearLayer(D.map);
     renderSelf();
     MK.polylines(D.map, [
@@ -206,8 +216,10 @@
       const ride = await api.acceptRide(id);
       D.currentRequest = null;
       D.activeRide = ride;
+      D.tripCode = generateTripCode();
       el("drv-request").classList.add("hidden");
       enterActiveTrip();
+      notify("Ride Accepted", `Drive to pickup — Code: ${D.tripCode}`);
       U.toast("Ride accepted!");
     } catch (e) {
       U.toast(e.error || "Could not accept ride");
@@ -230,6 +242,14 @@
     el("drv-request").classList.add("hidden");
     el("drv-active").classList.remove("hidden");
     renderActive();
+    setTimeout(() => {
+      D.map?.invalidateSize();
+      const r = D.activeRide;
+      if (r) {
+        const pts = [D.pos, { lat: r.pickup_lat, lng: r.pickup_lng }, { lat: r.dropoff_lat, lng: r.dropoff_lng }];
+        MK.fitAll(D.map, pts);
+      }
+    }, 200);
   }
 
   function rideTarget() {
@@ -237,23 +257,6 @@
     if (!r) return null;
     if (r.status === "in_transit") return { lat: r.dropoff_lat, lng: r.dropoff_lng };
     return { lat: r.pickup_lat, lng: r.pickup_lng };
-  }
-
-  function moveTick() {
-    if (!D.activeRide || !D.pos) return;
-    const target = rideTarget();
-    if (!target) return;
-    const dist = U.haversine(D.pos, target);
-    if (dist > 0.06) {
-      const f = 0.00075 / Math.max(dist, 0.00075);
-      D.pos.lat += (target.lat - D.pos.lat) * f;
-      D.pos.lng += (target.lng - D.pos.lng) * f;
-    }
-    renderSelf();
-    if (api.serverMode()) {
-      api.http("PUT", "/api/driver/location", { lat: D.pos.lat, lng: D.pos.lng }).catch(() => {});
-    }
-    renderActive();
   }
 
   async function advanceTrip() {
@@ -264,15 +267,18 @@
         const done = await api.completeRide(r.id);
         D.activeRide = done;
         U.toast("Trip completed! +" + U.ngn(r.fare));
+        notify("Trip Completed", `You earned ${U.ngn(r.fare)}`);
         renderActive();
       } else if (r.status === "arrived") {
         const ride = await api.updateRideStatus(r.id, "in_transit");
         D.activeRide = ride;
         U.toast("Trip started — drive safely!");
+        notify("Trip Started", "Passenger picked up. Drive safely!");
       } else {
         const ride = await api.updateRideStatus(r.id, "arrived");
         D.activeRide = ride;
         U.toast("Marked as arrived at pickup");
+        notify("Arrived at Pickup", "Waiting for passenger");
       }
       renderActive();
     } catch (e) {
@@ -285,6 +291,7 @@
     try {
       await api.cancelRide(D.activeRide.id, "Driver cancelled");
       U.toast("Trip cancelled");
+      notify("Trip Cancelled", "This ride has been cancelled");
       endTrip();
     } catch (e) { U.toast(e.error || "Could not cancel"); }
   }
@@ -298,32 +305,57 @@
     el("drv-active-fare").textContent = U.ngn(r.fare);
 
     const target = rideTarget();
-    const dist = target ? U.haversine(D.pos, target) : 0;
+    const dist = target && D.pos ? U.haversine(D.pos, target) : 0;
     const statusMap = {
       assigned: ["Heading to pickup", `Driver ${U.escapeHtml(d.name || "")} · ${d.vehicle_type || ""}`],
       driver_arriving: ["Heading to pickup", `${U.km(dist)} away · ${d.vehicle_type || ""}`],
-      arrived: ["Waiting at pickup", "Passenger ${passenger} is on the way"],
+      arrived: ["Waiting at pickup", "Passenger is on the way"],
       in_transit: ["On the way to destination", `${U.km(dist)} remaining`],
       completed: ["Trip completed", "Collect payment to finish"],
       cancelled: ["Trip cancelled", "This ride was cancelled"],
     };
     const [title, sub] = statusMap[r.status] || ["Active trip", ""];
     el("drv-active-status").textContent = title;
-    el("drv-active-sub").textContent = sub.includes("${passenger}") ? sub.replace("${passenger}", "your passenger") : sub;
+    el("drv-active-sub").textContent = sub;
 
     const btn = el("btn-drv-status");
     btn.textContent = r.status === "in_transit" ? "Complete trip" : r.status === "arrived" ? "Start trip" : "Arrived at pickup";
 
+    const codeEl = el("drv-trip-code");
+    if (codeEl) {
+      if (r.status !== "completed" && r.status !== "cancelled" && D.tripCode) {
+        codeEl.classList.remove("hidden");
+        codeEl.innerHTML = `<span class="trip-code-value">${D.tripCode}</span>
+          <input id="drv-verify-input" class="trip-code-input" type="text" maxlength="4" placeholder="Passenger code" />
+          <button id="btn-drv-verify" class="btn btn-sm">Verify</button>`;
+        const verifyBtn = el("btn-drv-verify");
+        if (verifyBtn) {
+          verifyBtn.onclick = () => {
+            const input = el("drv-verify-input");
+            if (input && input.value.trim() === D.tripCode) {
+              U.toast("Code verified!");
+              codeEl.innerHTML = `<span class="trip-code-value">${D.tripCode}</span> <span class="verified-label">✓ Verified</span>`;
+            } else {
+              U.toast("Code does not match");
+            }
+          };
+        }
+      } else {
+        codeEl.classList.add("hidden");
+        codeEl.innerHTML = "";
+      }
+    }
+
     renderPaymentUI(r);
 
-    // map
     MK.clearLayer(D.map);
     renderSelf();
     const pts = [{ lat: r.pickup_lat, lng: r.pickup_lng }, { lat: r.dropoff_lat, lng: r.dropoff_lng }];
     MK.polylines(D.map, pts, "#1a7dff");
     L.marker([r.pickup_lat, r.pickup_lng], { icon: MK.dropIcon("A") }).addTo(D.map);
     L.marker([r.dropoff_lat, r.dropoff_lng], { icon: MK.dropIcon("B") }).addTo(D.map);
-    MK.fitAll(D.map, [D.pos, ...pts]);
+    const fitPts = D.pos ? [D.pos, ...pts] : pts;
+    MK.fitAll(D.map, fitPts);
   }
 
   function renderPaymentUI(r) {
@@ -363,6 +395,7 @@
 
   function endTrip() {
     D.activeRide = null;
+    D.tripCode = null;
     el("drv-active").classList.add("hidden");
     el("drv-idle-card").classList.toggle("hidden", D.online);
     MK.clearLayer(D.map);
@@ -378,7 +411,7 @@
     el("drv-trips-view").classList.toggle("hidden", tab !== "trips");
     el("drv-profile-view").classList.toggle("hidden", tab !== "profile");
     if (home) {
-      setTimeout(() => D.map?.invalidateSize(), 150);
+      setTimeout(() => D.map?.invalidateSize(), 200);
     } else if (tab === "earnings") renderEarnings();
     else if (tab === "trips") renderTrips();
     else if (tab === "profile") renderProfile();

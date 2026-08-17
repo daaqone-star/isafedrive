@@ -122,6 +122,7 @@ def init_db(reset=True):
             completed_at TEXT,
             cancelled_at TEXT,
             cancel_reason TEXT,
+            trip_code TEXT,
             FOREIGN KEY(user_id) REFERENCES users(id),
             FOREIGN KEY(driver_id) REFERENCES drivers(id)
         );

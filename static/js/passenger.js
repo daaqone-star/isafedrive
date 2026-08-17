@@ -23,9 +23,14 @@
 
   function el(id) { return document.getElementById(id); }
 
+  function notify(title, body) {
+    window.App?.notify(title, body);
+  }
+
   // ---------------------------------------------------------------
   function init() {
     P.map = MK.createMap(el("pax-map"));
+    setTimeout(() => P.map?.invalidateSize(), 300);
     P.map.on("click", onMapClick);
     P.nearbyLayer = L.layerGroup().addTo(P.map);
 
@@ -54,6 +59,21 @@
     el("promo-input").addEventListener("keydown", (e) => { if (e.key === "Enter") applyPromoCode(); });
     el("btn-sos").onclick = () => el("sos-modal").classList.remove("hidden");
     el("btn-sos-close").onclick = () => el("sos-modal").classList.add("hidden");
+
+    // book-other checkbox
+    const bookOtherCheck = el("book-other-check");
+    if (bookOtherCheck) {
+      bookOtherCheck.onchange = () => {
+        el("book-other-fields").classList.toggle("hidden", !bookOtherCheck.checked);
+      };
+    }
+
+    // chat FAB
+    const chatFab = el("chat-fab");
+    if (chatFab) {
+      chatFab.onclick = () => openChat();
+      chatFab.classList.remove("hidden");
+    }
 
     // stars
     el("pax-stars").querySelectorAll("button").forEach((b) => {
@@ -160,7 +180,9 @@
   }
 
   function reverseGeocode(latlng, cb) {
-    fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latlng.lat}&lon=${latlng.lng}`)
+    fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latlng.lat}&lon=${latlng.lng}`, {
+      headers: { "User-Agent": "iSafedriveApp/1.0" }
+    })
       .then((r) => r.json())
       .then((d) => cb(d?.display_name?.split(",").slice(0, 3).join(",") || `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`))
       .catch(() => cb(`${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`));
@@ -302,6 +324,11 @@
       payment_method: method,
       promo_code: P.promoCode || null,
     };
+    const bookOtherCheck = el("book-other-check");
+    if (bookOtherCheck && bookOtherCheck.checked) {
+      payload.recipient_name = el("book-other-name")?.value.trim() || null;
+      payload.recipient_phone = el("book-other-phone")?.value.trim() || null;
+    }
     el("btn-book").disabled = true;
     try {
       await processPayment(method);
@@ -343,9 +370,18 @@
       U.toast("Your ride was cancelled");
       return;
     }
+    const prevStatus = P.activeRide ? P.activeRide.status : null;
     showSection("pax-active");
     updateActiveCard(ride);
     trackDriver(ride);
+
+    if (ride.status === "assigned" && prevStatus !== "assigned") {
+      notify("Driver Found!", "Your driver is on the way");
+    } else if (ride.status === "driver_arriving" && prevStatus !== "driver_arriving") {
+      notify("Driver Arrived!", "Your driver is waiting");
+    } else if (ride.status === "completed" && prevStatus !== "completed") {
+      notify("Trip Complete", "Thanks for riding with iSafedrive");
+    }
   }
 
   function updateActiveCard(ride) {
@@ -380,6 +416,15 @@
     rateBtn.classList.toggle("hidden", ride.status !== "completed");
     doneBtn.classList.toggle("hidden", !finished);
     el("pax-rate").classList.toggle("hidden", ride.status !== "completed");
+
+    const codeBox = el("pax-trip-code");
+    if (ride.trip_code && ["assigned", "driver_arriving"].includes(ride.status)) {
+      el("pax-code-value").textContent = ride.trip_code;
+      codeBox.classList.remove("hidden");
+    } else {
+      codeBox.classList.add("hidden");
+    }
+
     renderReceipt(ride);
   }
 
@@ -530,6 +575,8 @@
 
   let _chatTimer = null;
   async function openChat(rideId) {
+    const chatFab = el("chat-fab");
+    if (chatFab) chatFab.classList.add("hidden");
     el("chat-panel").classList.remove("hidden");
     el("chat-title").textContent = rideId ? `Chat — Ride #${rideId}` : "iSafedrive Support";
     el("chat-messages").innerHTML = "";
@@ -576,6 +623,8 @@
   function closeChat() {
     el("chat-panel").classList.add("hidden");
     clearInterval(_chatTimer);
+    const chatFab = el("chat-fab");
+    if (chatFab) chatFab.classList.remove("hidden");
   }
 
   global.Pax = { init, paxTab, placePickup, bookDriver, openChat, sendChat, closeChat };

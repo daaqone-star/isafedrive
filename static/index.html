@@ -151,6 +151,11 @@
 
           <!-- Booking form -->
           <div id="pax-booking" class="pax-section">
+            <label class="book-other-toggle"><input type="checkbox" id="book-other-check" /> Book for someone else</label>
+            <div id="book-other-fields" class="hidden">
+              <div class="field"><label>Recipient name</label><input type="text" id="book-other-name" placeholder="Who is this ride for?" /></div>
+              <div class="field"><label>Recipient phone</label><input type="tel" id="book-other-phone" placeholder="Their phone number" /></div>
+            </div>
             <div class="where-row">
               <div class="where-dots">
                 <span class="dot dot-a"></span>
@@ -229,6 +234,11 @@
               </div>
             </div>
             <div class="status-line" id="pax-status-line"></div>
+            <div id="pax-trip-code" class="trip-code-box hidden">
+              <span class="tc-label">Trip Verification Code</span>
+              <span class="tc-code" id="pax-code-value">----</span>
+              <span class="tc-hint">Show this to your driver to start the trip</span>
+            </div>
             <div class="pay-status" id="pax-pay-status"></div>
             <button class="btn btn-sos" id="btn-sos"><span>🆘</span> Emergency (SOS)</button>
             <div class="active-actions">
@@ -312,6 +322,13 @@
             <span class="req-pin pin-a">A</span><span id="drv-active-pickup">—</span>
             <span class="req-pin pin-b">B</span><span id="drv-active-dropoff">—</span>
           </div>
+          <div id="drv-trip-code" class="trip-code-box hidden">
+            <span class="tc-label">Ask passenger for verification code</span>
+            <div class="tc-input-row">
+              <input type="text" id="drv-code-input" class="tc-input" maxlength="4" placeholder="----" inputmode="numeric" />
+              <button class="btn btn-primary" id="btn-drv-verify">Verify</button>
+            </div>
+          </div>
           <div class="drv-active-actions">
             <button class="btn btn-primary" id="btn-drv-status">Start trip</button>
             <button class="btn btn-ghost-danger" id="btn-drv-cancel-trip">Cancel</button>
@@ -380,6 +397,12 @@
 
   <div id="toast" class="toast"></div>
 
+  <div id="notif-panel" class="notif-panel hidden">
+    <div class="notif-head"><strong>Notifications</strong><button class="icon-btn" id="notif-close">✕</button></div>
+    <div class="notif-list" id="notif-list"></div>
+  </div>
+  <button id="notif-fab" class="notif-fab hidden" onclick="App.toggleNotifs()">🔔</button>
+
   <div id="sos-modal" class="modal hidden">
     <div class="modal-card">
       <div class="modal-title">🆘 Emergency help</div>
@@ -399,6 +422,10 @@
     </div>
   </div>
 
+  <div id="chat-fab" class="chat-fab hidden" onclick="Pax.openChat()">
+    <span>💬</span>
+    <span id="chat-unread" class="chat-unread hidden">0</span>
+  </div>
   <div id="chat-panel" class="chat-panel hidden">
     <div class="chat-head">
       <strong id="chat-title">iSafedrive Support</strong>
